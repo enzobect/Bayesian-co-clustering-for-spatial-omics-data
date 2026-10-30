@@ -1,0 +1,144 @@
+\documentclass[a4paper, 12pt, twoside]{report}
+
+% --- Packages de base ---
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor} 
+\usepackage{titlesec} 
+\usepackage{float} 
+
+
+\usepackage{listings}
+\usepackage{lscape}
+\usepackage{subcaption} 
+\usepackage[colorinlistoftodos]{todonotes}
+
+% Configuration du format des chapitres
+\titleformat{\chapter}[block] % Style bloc pour tout avoir sur une ligne
+  {\normalfont\huge\bfseries\color{black}} 
+  {Chapitre n°\thechapter\ : } % Label : "Chapitre N°" + le numéro + " : "
+  {0.2em} % Espace entre le numéro et le titre
+  {} 
+
+% Pour que les titres ne commencent pas trop bas sur la page
+\titlespacing*{\chapter}{0pt}{-20pt}{40pt}
+
+\definecolor{monBleu}{RGB}{0, 51, 102}
+
+
+% Définit la couleur des sections en bleu standard
+\titleformat{\section}{\normalfont\large\bfseries\color{monBleu}}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{monBleu}}{\thesubsection}{1em}{}
+
+
+% Configuration des marges 
+\geometry{top=3cm, bottom=2cm, left=3cm, right=3cm, marginparwidth=1.75cm}
+
+% Configuration des liens 
+\hypersetup{colorlinks=false}
+
+\usepackage[most]{tcolorbox}
+
+% Style pour les Définitions Techniques 
+\newtcolorbox{definition}[1]{%
+    colback=monBlue!5!white,    % Fond bleu très clair
+    colframe=monBlue!75!black,  % Bordure bleu foncé
+    fonttitle=\bfseries,
+    title=Définition : #1,    % Titre automatique
+    arc=0mm,                 % Coins carrés (plus sérieux)
+    enhanced,
+    drop shadow % Petit effet d'ombre
+    after skip=15pt
+}
+
+% --- Style pour les Institutions ---
+\newtcolorbox{institution}[1]{%
+    colback=gray!10!white,   % Fond gris clair
+    colframe=gray!80!black,  % Bordure grise
+    fonttitle=\bfseries,
+    title=Institution : #1,   % Titre automatique
+    arc=3mm,                 % Coins arrondis
+    boxrule=1pt,
+    left=10pt      
+}
+
+% --- Style pour les Textes de Loi et Articles de Droit ---
+\newtcolorbox{loi}[1]{%
+    enhanced,
+    colback=white,           % Fond blanc pour rester sobre
+    colframe=gray!60!black,  % Bordure grise foncée
+    arc=0mm,                 % Coins bien droits
+    boxrule=0pt,             % Pas de bordure générale
+    leftrule=4pt,            % Grosse barre à gauche
+    fonttitle=\bfseries\color{gray!60!black},
+    title=Réf : #1,           % Titre discret (ex: Art. 2 Convention d'Oviedo)
+    detach title,            % On sépare le titre du corps
+    before upper={\textbf{#1} \medskip \par}, % Affiche la réf en gras au début
+    fontupper=\itshape,      % Texte de loi en italique
+    after skip=15pt          % Espace après le cadre
+}
+
+
+\begin{document}
+
+% --- PAGE DE GARDE ---
+\begin{titlepage}
+    % En-tête : École à gauche, Logo à droite
+    \begin{minipage}[t]{0.6\textwidth}
+        \begin{flushleft}
+            \large \textbf{Politecnico di Milano} \\
+            \small Department of Statistics
+        \end{flushleft}
+    \end{minipage}
+    \begin{minipage}[t]{0.4\textwidth}
+        \begin{flushright}
+            % Remplacez par votre fichier logo (ex: logo_telecom.png)
+            % Si vous n'avez pas de logo, remplacez par : \rule{4cm}{2cm}
+            \includegraphics[width=5cm]{logo_polimi.png} 
+        \end{flushright}
+    \end{minipage}
+
+    \vspace{2.5cm}
+
+    \centering
+    % Titre avec traits horizontaux
+    \rule{\linewidth}{0.5mm} \\[0.4cm]
+    {\huge \bfseries Bayesian co-clustering for spatial omics data} \\[0.4cm]
+    \rule{\linewidth}{0.5mm} \\[2.5cm]
+
+    % Section Auteurs et Superviseur
+    \begin{minipage}[t]{0.5\textwidth}
+        \begin{flushleft} \large
+            \emph{Autors :}\\
+            Vittoria Mariani \\
+            Marco Toletti \\
+            Gregoire Genouville \\
+            Kasra Khoshjou \\
+            Rona Elias \\
+            Enzo Bect\\
+        \end{flushleft}
+    \end{minipage}
+    \begin{minipage}[t]{0.4\textwidth}
+        \begin{flushright} \large
+            \emph{Supervisor :}\\
+            Prof. Andrea Sottosanti
+        \end{flushright}
+    \end{minipage}
+
+    \vfill 
+
+    
+    {\large \today}
+
+\end{titlepage}
+
+
+
+\end{document}
+
+
