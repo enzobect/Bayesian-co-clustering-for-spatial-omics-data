@@ -19,9 +19,9 @@ git clone the_https_link_available_by_clicking_on_"code"_in_green_on_github
 ```bash
 # Inside the Rstudio's terminal
 
-git commit -m "my message about what I did"
-
 git add .
+
+git commit -m "my message about what I did"
 
 git push #if this does not work it probably means that you don't pull the last version.
 
