@@ -6,7 +6,7 @@ output:
 date: '2026-10-30'
 ---
 
-```{rsetup, include=FALSE}
+```{rsetup, include=TRUE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 ```
 
@@ -56,7 +56,6 @@ s_tot<-sum(si) #we normalize the si, tiw s_tot = 1
 
 wj<- colSums(data2) 
 gj<-wj/sum(data2)# g is a vector st g[j] = gj
-g_tot<-sum(wj) #we normalize the si, tiw g_tot = 1
 
 u = runif(1)
 lambda<-1
@@ -69,30 +68,27 @@ max(poisson_lambda)
 
 y<-rpois(n=length(s) * length(g),lambda = poisson_lambda)
 head(y,50)
-
-
-
-
-
-
-
 ```
 
 The problem here is the quantity $s_i*g_j*\mu_{rk} \sim 10^{-5}$ is too low. Then $(Y_{ij} \mid Z_i = k, W_j = r) = 0$ for each simulation.
 
-So, I tried to simulate with different values of $g_j$ : $g_j = \frac{\sum_{i=1}^N y_{ij}}{N_{genes}}$, $g_j = \frac{\sum_{i=1}^N y_{ij}}{\sqrt{N_{genes}}}$, $g_j = \sum_{i=1}^N y_{ij}$.
+So, I tried to simulate with different values of $g_j$ : $g_j = \frac{\sum_{i=1}^N y_{ij}}{N_{genes}}$, $g_j = \frac{\sum_{i=1}^N y_{ij}}{\sqrt{N_{genes}}}$, $g_j = \sum_{i=1}^N y_{ij}$. Therefore, the difference is the meaning of $g_j$ :
+
+$g_j = \frac{\sum_{i=1}^N y_{ij}}{N_{spot}}$ means "On average, this gene produces 12 molecules by spot on the tissue".
+
+$g_j = \frac{\sum_{i=1}^N y_{ij}}{\sum_{j=1}^W \sum_{i=1}^N y_{ij}}$ means "the ratio of the presence of this gene on the tissue according to the presence of the others ones".
 
 ```{r pressure, results = 'markup'}
 
 si<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
 N<-ncol(data2)
-s_tot<-sum(zi) #we normalize the si, tiw s_tot = 1
+s_tot<-sum(si) #we normalize the si, tiw s_tot = 1
 
 wj<- colSums(data2) 
 W<-nrow(data2)
 gj<-wj
 gj2<-wj/W**0.5
-gj3<-wj/W
+#gj3<-wj/W
 
 u = runif(1)
 lambda<-1
@@ -101,7 +97,7 @@ print(mu_rk)
 
 poisson_lambda <- outer(si, gj, "*") * mu_rk
 poisson_lambda2 <- outer(si, gj2, "*") * mu_rk
-poisson_lambda3 <- outer(si, gj3, "*") * mu_rk
+#poisson_lambda3 <- outer(si, gj3, "*") * mu_rk
 
 max(poisson_lambda)
 
@@ -113,11 +109,6 @@ y_sim <- matrix(
 
 y_sim2 <- matrix(
   rpois(n = length(poisson_lambda2), lambda = poisson_lambda2),
-  nrow = N,
-  ncol = W
-)
-y_sim3 <- matrix(
-  rpois(n = length(poisson_lambda3), lambda = poisson_lambda3),
   nrow = N,
   ncol = W
 )
@@ -141,17 +132,49 @@ pheatmap(
   cluster_cols = FALSE,
   show_rownames = FALSE,
   show_colnames = FALSE,
-  main = "Matrix 2 (échelle log2) "
+  main = "Matrix 2 (échelle log2)"
 )
 
-pheatmap(
-  log2(y_sim3 + 1),
-  cluster_rows = FALSE,
-  cluster_cols = FALSE,
-  show_rownames = FALSE,
-  show_colnames = FALSE,
-  main = "Matrix 3 (échelle log2) "
-)
+
+#y_sim3 <- matrix(
+#  rpois(n = length(poisson_lambda3), lambda = poisson_lambda3),
+#  nrow = N,
+#  ncol = W
+#)
+
+#pheatmap(
+#  log2(y_sim3 + 1),
+#  cluster_rows = FALSE,
+#  cluster_cols = FALSE,
+#  show_rownames = FALSE,
+#  show_colnames = FALSE,
+#  main = "Matrix 3 (échelle log2) "
+#)
 
 
 ```
+
+We search, how similar is the distribution of the genes according to both of the $g_j$.
+
+Spoiler : we remark that the top 4 is similar and the fifth-gene is changing.
+
+```{r pressure, results = 'markup'}
+
+g_sim<-colSums(y_sim)
+g_sim2<-colSums(y_sim2)
+
+top_w <- order(wj, decreasing = TRUE)[1:10]
+top5 <- order(g_sim, decreasing = TRUE)[1:10]
+top_2 <- order(g_sim2, decreasing = TRUE)[1:10]
+
+
+
+top_w
+top5
+top_2
+
+print(wj[top_w])
+print(wj[top5])
+```
+
+Conclusion : In that way, we can say by using both of the $g_j$, the local probability to draw the gene $j$ on the spot $i$ is depended on the block $\mu_{rk}$ .
