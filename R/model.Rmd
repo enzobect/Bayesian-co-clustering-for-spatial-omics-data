@@ -4,6 +4,8 @@ output:
   html_document: default
   pdf_document: default
 date: '2026-10-30'
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{rsetup, include=TRUE}
@@ -78,7 +80,7 @@ $g_j = \frac{\sum_{i=1}^N y_{ij}}{N_{spot}}$ means "On average, this gene produc
 
 $g_j = \frac{\sum_{i=1}^N y_{ij}}{\sum_{j=1}^W \sum_{i=1}^N y_{ij}}$ means "the ratio of the presence of this gene on the tissue according to the presence of the others ones".
 
-```{r pressure, results = 'markup'}
+```{r pressure, results='markup'}
 
 si<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
 N<-ncol(data2)
@@ -103,14 +105,14 @@ max(poisson_lambda)
 
 y_sim <- matrix(
   rpois(n = length(poisson_lambda), lambda = poisson_lambda),
-  nrow = N,
-  ncol = W
+  nrow = W,
+  ncol = N
 )
 
 y_sim2 <- matrix(
   rpois(n = length(poisson_lambda2), lambda = poisson_lambda2),
-  nrow = N,
-  ncol = W
+  nrow = W,
+  ncol = N
 )
 
 
@@ -138,8 +140,8 @@ pheatmap(
 
 #y_sim3 <- matrix(
 #  rpois(n = length(poisson_lambda3), lambda = poisson_lambda3),
-#  nrow = N,
-#  ncol = W
+#  nrow = W,
+#  ncol = N
 #)
 
 #pheatmap(
@@ -156,7 +158,7 @@ pheatmap(
 
 We search, how similar is the distribution of the genes according to both of the $g_j$.
 
-Spoiler : we remark that the top 4 is similar and the fifth-gene is changing.
+Spoiler : we remark that the top 10 is similar and is is also similar to the real data.
 
 ```{r pressure, results = 'markup'}
 
@@ -169,12 +171,11 @@ top_2 <- order(g_sim2, decreasing = TRUE)[1:10]
 
 
 
-top_w
+top_5_real_data
 top5
-top_2
+top5_2
 
-print(wj[top_w])
-print(wj[top5])
+
 ```
 
 Conclusion : In that way, we can say by using both of the $g_j$, the local probability to draw the gene $j$ on the spot $i$ is depended on the block $\mu_{rk}$ .
