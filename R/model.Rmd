@@ -1,0 +1,71 @@
+---
+title: "BISON"
+output:
+  html_document: default
+  pdf_document: default
+date: '2026-10-30'
+---
+
+```{rsetup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+# Bison Algorithm
+
+The goal here is, at first, compute the algorithm as it is written in the article.
+
+## We import the data
+
+```{r pressure, results = 'markup'}
+data1 <- read_csv("/Users/enzobect/Documents/Bayesian-co-clustering-for-spatial-omics-data/Data/data_processed/mouse_brain_4700_bin_centers.csv")
+
+data2 <- read_csv("/Users/enzobect/Documents/Bayesian-co-clustering-for-spatial-omics-data/Data/data_processed/mouse_brain_top500_4700bins_vals.csv")
+
+
+
+
+head(data2, 10)
+```
+
+## Model formulation
+
+The goal here is to simulate $(Y_{ij} \mid Z_i = k, W_j = r) \sim \text{Poisson}(s_i*g_j*\mu_{rk})$.
+
+$s_i = \frac{\sum_{j=1}^W y_{ij}}{\sum_{j=1}^W \sum_{i=1}^N y_{ij}}$.
+
+$g_j = \frac{\sum_{i=1}^N y_{ij}}{\sum_{j=1}^W \sum_{i=1}^N y_{ij}}$.
+
+$\mu_{rk} \sim \text{Gamma}(\alpha_{\mu},\beta_{\mu})$ where $\alpha_{\mu} = \beta_{\mu} = 1$. So, $\mu_{rk} \sim \text{Exp}(\lambda)$ where $\lambda = 1$
+
+The problem here is the quantity $s_i*g_j*\mu_{rk} \sim 10^{-5}$ is too low. Then $(Y_{ij} \mid Z_i = k, W_j = r) = 0$ for each simulation
+
+```{r pressure, results = 'markup'}
+
+
+
+zi<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
+s_tot<-sum(zi) #we normalize the si, tiw s_tot = 1
+
+wj<- colSums(data2) 
+gj<-wj/sum(data2)# g is a vector st g[j] = gj
+g_tot<-sum(wj) #we normalize the si, tiw g_tot = 1
+
+u = runif(1)
+lambda<-1
+mu_rk<-(-1/lambda)*log(u) # we simulate exp_law
+print(mu_rk)
+
+poisson_lambda <- outer(s, g, "*") * mu_rk
+
+max(poisson_lambda)
+
+#y<-rpois(n=length(s) * length(g),lambda = poisson_lambda)
+#head(y,50)
+
+
+
+
+
+
+
+```
