@@ -165,17 +165,45 @@ Spoiler : we remark that the top 10 is similar and is is also similar to the rea
 g_sim<-colSums(y_sim)
 g_sim2<-colSums(y_sim2)
 
-top_w <- order(wj, decreasing = TRUE)[1:10]
+top_5_real_data <- order(wj, decreasing = TRUE)[1:10]
 top5 <- order(g_sim, decreasing = TRUE)[1:10]
-top_2 <- order(g_sim2, decreasing = TRUE)[1:10]
-
-
+top5_2 <- order(g_sim2, decreasing = TRUE)[1:10]
 
 top_5_real_data
 top5
 top5_2
 
+bottom_real_data <- order(wj)[1:10]
+bottom <- order(g_sim)[1:10]
+bottom_2 <- order(g_sim2)[1:10]
+
+g_sim[bottom]
+g_sim[bottom_2]
 
 ```
 
 Conclusion : In that way, we can say by using both of the $g_j$, the local probability to draw the gene $j$ on the spot $i$ is depended on the block $\mu_{rk}$ .
+
+## Prior on spot (Potts model or MRF ? )
+
+$P(z)$
+
+## Prior on gene (Zero-inflated Polya urn prior)
+
+$P(w) = \pi_0^{w_{0}}*(1-\pi_0)^{w-w_{0}}* \frac{\gamma^R*\prod_{r=1}^R{\text{Gamma}(w_r)}}{\prod_{j=1}^{w-w_0}(\gamma+j-1)}$ where $\pi_{0} \sim \beta(\alpha_\pi,\beta_\pi)$ . Gamma depends on the number of spots in the data and the number of cluster K that we want to reach. If gamma increases the probability of a new cluster increases too.
+
+```{r pressure, results = 'markup'}
+
+gamma_parameter<-c(0.1,0.2,0.5,1,2,5)
+
+
+
+
+
+
+
+```
+
+## Posterior inference
+
+$P(\mu,w,z \mid Y ) \propto P(Y \mid \mu,w,z)*P(\mu \mid w,z)*P(z)$
