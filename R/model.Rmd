@@ -10,6 +10,14 @@ date: '2026-10-30'
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 ```
 
+# Packages
+
+```{r pressure, results = 'markup'}
+if(!require(pheatmap)) install.packages("pheatmap")
+library(pheatmap)
+
+```
+
 # Bison Algorithm
 
 The goal here is, at first, compute the algorithm as it is written in the article.
@@ -37,14 +45,14 @@ $g_j = \frac{\sum_{i=1}^N y_{ij}}{\sum_{j=1}^W \sum_{i=1}^N y_{ij}}$.
 
 $\mu_{rk} \sim \text{Gamma}(\alpha_{\mu},\beta_{\mu})$ where $\alpha_{\mu} = \beta_{\mu} = 1$. So, $\mu_{rk} \sim \text{Exp}(\lambda)$ where $\lambda = 1$
 
-The problem here is the quantity $s_i*g_j*\mu_{rk} \sim 10^{-5}$ is too low. Then $(Y_{ij} \mid Z_i = k, W_j = r) = 0$ for each simulation
+This is the exact simulation but ...
 
 ```{r pressure, results = 'markup'}
 
 
 
-zi<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
-s_tot<-sum(zi) #we normalize the si, tiw s_tot = 1
+si<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
+s_tot<-sum(si) #we normalize the si, tiw s_tot = 1
 
 wj<- colSums(data2) 
 gj<-wj/sum(data2)# g is a vector st g[j] = gj
@@ -55,17 +63,95 @@ lambda<-1
 mu_rk<-(-1/lambda)*log(u) # we simulate exp_law
 print(mu_rk)
 
-poisson_lambda <- outer(s, g, "*") * mu_rk
+poisson_lambda <- outer(si, gj, "*") * mu_rk
 
 max(poisson_lambda)
 
-#y<-rpois(n=length(s) * length(g),lambda = poisson_lambda)
-#head(y,50)
+y<-rpois(n=length(s) * length(g),lambda = poisson_lambda)
+head(y,50)
 
 
 
 
 
+
+
+```
+
+The problem here is the quantity $s_i*g_j*\mu_{rk} \sim 10^{-5}$ is too low. Then $(Y_{ij} \mid Z_i = k, W_j = r) = 0$ for each simulation.
+
+So, I tried to simulate with different values of $g_j$ : $g_j = \frac{\sum_{i=1}^N y_{ij}}{N_{genes}}$, $g_j = \frac{\sum_{i=1}^N y_{ij}}{\sqrt{N_{genes}}}$, $g_j = \sum_{i=1}^N y_{ij}$.
+
+```{r pressure, results = 'markup'}
+
+si<- rowSums(data2)/sum(data2) # s is a vector st s[i] = si
+N<-ncol(data2)
+s_tot<-sum(zi) #we normalize the si, tiw s_tot = 1
+
+wj<- colSums(data2) 
+W<-nrow(data2)
+gj<-wj
+gj2<-wj/W**0.5
+gj3<-wj/W
+
+u = runif(1)
+lambda<-1
+mu_rk<-(-1/lambda)*log(u) # we simulate exp_law
+print(mu_rk)
+
+poisson_lambda <- outer(si, gj, "*") * mu_rk
+poisson_lambda2 <- outer(si, gj2, "*") * mu_rk
+poisson_lambda3 <- outer(si, gj3, "*") * mu_rk
+
+max(poisson_lambda)
+
+y_sim <- matrix(
+  rpois(n = length(poisson_lambda), lambda = poisson_lambda),
+  nrow = N,
+  ncol = W
+)
+
+y_sim2 <- matrix(
+  rpois(n = length(poisson_lambda2), lambda = poisson_lambda2),
+  nrow = N,
+  ncol = W
+)
+y_sim3 <- matrix(
+  rpois(n = length(poisson_lambda3), lambda = poisson_lambda3),
+  nrow = N,
+  ncol = W
+)
+
+
+
+palette_couleurs <- colorRampPalette(c("blue", "white", "red"))(100)
+
+pheatmap(
+  log2(y_sim + 1),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,
+  show_colnames = FALSE,
+  main = "Matrix (échelle log2)"
+)
+
+pheatmap(
+  log2(y_sim2 + 1),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,
+  show_colnames = FALSE,
+  main = "Matrix 2 (échelle log2) "
+)
+
+pheatmap(
+  log2(y_sim3 + 1),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,
+  show_colnames = FALSE,
+  main = "Matrix 3 (échelle log2) "
+)
 
 
 ```
