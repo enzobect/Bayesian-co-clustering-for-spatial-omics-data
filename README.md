@@ -41,17 +41,17 @@ git pull #if you do that, be aware that it could remove a part of your job if yo
 
 # Architecure
 mon_projet/
-├── Bstat.Rproj        
-├── README.md               
+├── Bstat.Rproj
+├── README.md
 ├── .gitignore
-├── Data/           
-│   ├── data_processed/                 
+├── Data/
+│   ├── data_processed/
 │   └── original_data/
 ├── R/
-│   ├── analyse.Rmd      
-│   ├── model.Rmd  
-│   └── draft.Rmd      
+│   ├── analyse.Rmd
+│   ├── model.Rmd
+│   └── draft.Rmd
 ├── Repport/
-│   └── final.tex   
+│   └── final.tex
 └── Output/
-    └── data_clean/          
+    └── data_clean/     
