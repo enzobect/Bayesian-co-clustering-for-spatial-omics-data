@@ -39,7 +39,9 @@ git pull #if you do that, be aware that it could remove a part of your job if yo
 
 ```
 
-# Architecure
+## Architecture
+
+```text
 mon_projet/
 ├── Bstat.Rproj
 ├── README.md
@@ -54,4 +56,5 @@ mon_projet/
 ├── Repport/
 │   └── final.tex
 └── Output/
-    └── data_clean/     
+    └── data_clean/
+``` 
