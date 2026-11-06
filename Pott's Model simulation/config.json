@@ -1,0 +1,21 @@
+{
+  "hyper_parameters":{
+    "R":20,
+    "K":20,
+    "mu_0": 4,
+    "lambda": 1,
+    "alpha_0": 1,
+    "beta_0": 1,
+    "beta":1,
+    "pi":null
+  },
+  "paths":{
+    "path_to_values": "../../mouse_brain_data/mouse_brain_top500_4700bins_vals.csv",
+    "path_to_adjecency": "../../mouse_brain_data/adjecency.csv",
+    "path_to_history_files":"../../potts_history"
+  },
+  "sampler":{
+    "n_iter": 1e4
+  }
+
+}
