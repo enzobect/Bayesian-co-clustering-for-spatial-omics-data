@@ -27,7 +27,7 @@ end
 # %%
 @inline function load_hyper_parameters(config)::Hyper_Parameters
     π = config.hyper_parameters.pi
-    if π == nothing # if weights not specified default to unif. dis'n
+    if isnothing(π) # if weights not specified default to unif. dis'n
         π = ones(config.hyper_parameters.K)
         π /= sum(π)
     end
@@ -75,7 +75,7 @@ function main()
         # sleep(.001)
         update_μ_and_σ2!(state,hyper_parameters)
         update_z!(state,hyper_parameters)
-        update_w!(state,hyper_parameters)
+        update_w!(state,hyper_parameters,data)
 
         push!(history, deepcopy(state))
         # TODO: save the history frequently to support early termination
