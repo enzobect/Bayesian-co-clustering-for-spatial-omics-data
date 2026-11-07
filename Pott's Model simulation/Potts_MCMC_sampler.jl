@@ -1,6 +1,5 @@
 using LinearAlgebra
 using Statistics, Distributions, Random
-
 struct Observed_Data
     #dimensions
     N::Int # number of points
@@ -46,23 +45,57 @@ function update_μ_and_σ2!(state::MCMC_State, hyper_Parameters::Hyper_Parameter
 end
 function update_z!(state::MCMC_State, hyper_parameters::Hyper_Parameters)
 end
+# TODO: instead of computing this every time for w|res, compute and upate in z|res and store in the aux. object
+@inline function get_genes_of_clusters(state::MCMC_State,G::Int, K::Int)::Dict{Int, Vector{Int}}
+    # construct the data structure
+    res = Dict{Int, Vector{Int}}()
+    for c in 1:K
+        res[c] = Int[]
+    end
 
+    #fill in the inverse map
+    for g in 1:G
+        push!(res[state.z[g]], g)
+    end
+
+    return res
+end
+"""
+returns a dictionary from gene cluster idx c to a 2-element vector
+the vector consists of
+
+    1. ∑y_n,i for i in cluster c
+    2. ∑(y_n,i)^2 for in cluster c
+"""
+@inline function get_moments_of_values_by_cluster(data::Observed_Data, cluster_to_genes::Dict{Int, Vector{Int}}, n::Int,K::Int)::Dict{Int,Vector{Float64}}
+    moment = Dict{Int,Vector{Float64}}()
+    for c in 1:K
+        moment[c] = Float64[0,0]
+        values = @view data.y[n, cluster_to_genes[c]]
+        moment[c][1] = sum(values)
+        moment[c][2] = sum(values .^ 2)
+    end
+    return moment
+end
 function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::Observed_Data)
 
   R = hyper_parameters.R
   N = data.N
   G = data.G
   β = hyper_parameters.β
-
+  K = hyper_parameters.K
   # Generate a permutation σ of J = {1,2,...,N}
   permutation = randperm(N)
+
+  cluster_to_gene = get_genes_of_clusters(state, data.G, hyper_parameters.K)
 
   # For j in 1,...,N
   for n in permutation
     log_probabilities = zeros(R)
-    
-    for r in 1:R
 
+    moment_by_cluster = get_moments_of_values_by_cluster(data, cluster_to_gene, n, K)
+
+    for r in 1:R
       # Count the number of neighbors of spot n that are assigned to cluster r (δ(w_j, w_j') in Equation 6)
       number_of_neighbors_r = 0
       for neighbor in data.adjecency[n,:]
@@ -73,29 +106,34 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
 
       # Evaluation of the posterior distribution h_j (w_j) (Equation 12)
       data_likelihood = 0.0
-      for g in 1:G
-        gene_cluster = state.z[g]
-        value = data.y[n,g]
-        cluster_mean = state.μ[r,gene_cluster]
-        cluster_variance = state.σ2[r,gene_cluster]
+      for c in 1:K
+          n_values = length(cluster_to_gene[c])
+          cluster_mean = state.μ[r,c]
+          cluster_variance = state.σ2[r,c]
+          
+          data_likelihood += -0.5 * # ∑(vi - μ)^2 = ∑vi^2 - 2μ∑vi + μ^2×#{g in cluster c}
+                            (   (moment_by_cluster[c][2] - 2 * cluster_mean * moment_by_cluster[c][1] + cluster_mean^2 * n_values)
+                                / cluster_variance
+                            ) +
+                            log(cluster_variance)*n_values
 
-        data_likelihood += -0.5 * ((value-cluster_mean)^2 / cluster_variance) + log(cluster_variance)
       end
 
       # Local update rule for "energy" for Potts distribution (Equation 6)
       log_probabilities[r] = number_of_neighbors_r * β + data_likelihood
 
     end
-  
+
     max_log_probabilities = maximum(log_probabilities)
 
     # Normalize the probabilities and take the exponential to get the actual probabilities
     # .- does the vector-scalar subtraction and exp. does the element-wise exponential (instead of the matrix exponential)
-    normalized_probabilities = exp.(log_probabilities .- max_log_probabilities) 
+    normalized_probabilities = exp.(log_probabilities .- max_log_probabilities)
     normalized_probabilities /= sum(normalized_probabilities)
 
     # Sample a new cluster assignment from the Multinomial with the computed probabilities
     state.w[n] = rand(Categorical(normalized_probabilities))
 
   end
+  # println(time() - t0)
 end
