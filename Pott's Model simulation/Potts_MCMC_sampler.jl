@@ -66,7 +66,7 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
       # Count the number of neighbors of spot n that are assigned to cluster r (δ(w_j, w_j') in Equation 6)
       number_of_neighbors_r = 0
       for neighbor in data.adjecency[n,:]
-        if state.w[neighbor] == r && neighbor != 0
+        if neighbor != 0 && state.w[neighbor] == r
           number_of_neighbors_r += 1
         end
       end
@@ -79,7 +79,7 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
         cluster_mean = state.μ[r,gene_cluster]
         cluster_variance = state.σ2[r,gene_cluster]
 
-        data_likelihood += -0.5 * ((value-cluster_mean)^2 / cluster_variance) - 0.5 * log(cluster_variance)
+        data_likelihood += -0.5 * ((value-cluster_mean)^2 / cluster_variance) + log(cluster_variance)
       end
 
       # Local update rule for "energy" for Potts distribution (Equation 6)
