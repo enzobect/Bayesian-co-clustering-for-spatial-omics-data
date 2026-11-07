@@ -16,7 +16,7 @@ const SEED = hash("MCMC sampler for the Pott's Model")
     adj_path = config.paths.path_to_adjecency
 
     obs_values= DataFrame(CSV.File(y_data_path))
-    adjecency = DataFrame(CSV.File(adj_path))
+    adjecency = DataFrame(CSV.File(adj_path, header=false))
 
     data = Observed_Data(DataFrames.nrow(obs_values),
                          DataFrames.ncol(obs_values),
