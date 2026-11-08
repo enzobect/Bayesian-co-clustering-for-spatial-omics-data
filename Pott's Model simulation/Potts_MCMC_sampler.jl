@@ -41,7 +41,67 @@ struct Hyper_Parameters
     π::Vector{Float64}
 end
 
-function update_μ_and_σ2!(state::MCMC_State, hyper_Parameters::Hyper_Parameters)
+function update_μ_and_σ2!(
+    state::MCMC_State,
+    hyper_parameters::Hyper_Parameters,
+    data::Observed_Data
+)
+    R = hyper_parameters.R
+    K = hyper_parameters.K
+
+    μ0 = hyper_parameters.μ0
+    λ = hyper_parameters.λ
+    α0 = hyper_parameters.α0
+    β0 = hyper_parameters.β0
+
+    cluster_to_spots = get_spots_of_clusters(state, data.N, R)
+    cluster_to_genes = get_genes_of_clusters(state, data.G, K)
+
+    for r in 1:R
+        for k in 1:K
+            spots = cluster_to_spots[r]
+            genes = cluster_to_genes[k]
+
+            # Number of observations in this block
+            m = length(spots) * length(genes)
+
+            if m == 0
+                # Empty block: posterior equals the prior
+                λ_star = λ
+                μ_star = μ0
+                α_star = α0
+                β_star = β0
+            else
+                values = @view data.y[spots, genes]
+
+                block_mean = mean(values)
+                squared_deviations =
+                    sum(x -> (x - block_mean)^2, values)
+
+                # Posterior parameters
+                λ_star = λ + m
+                μ_star = (λ * μ0 + m * block_mean) / λ_star
+                α_star = α0 + m / 2
+
+                β_star = β0 +
+                         squared_deviations / 2 +
+                         (λ * m / (2 * λ_star)) *
+                         (block_mean - μ0)^2
+            end
+
+            # Sample variance first, then mean conditional on variance
+            state.σ2[r, k] = rand(InverseGamma(α_star, β_star))
+
+            state.μ[r, k] = rand(
+                Normal(
+                    μ_star,
+                    sqrt(state.σ2[r, k] / λ_star)
+                )
+            )
+        end
+    end
+
+    return nothing
 end
 
 @inline function get_spots_of_clusters(state::MCMC_State,N::Int, R::Int)::Dict{Int, Vector{Int}}
