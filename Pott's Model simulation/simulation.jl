@@ -73,7 +73,7 @@ function main()
 
     @showprogress for i in 1:config.sampler.n_iter
         # sleep(.001)
-        update_μ_and_σ2!(state,hyper_parameters)
+        update_μ_and_σ2!(state,hyper_parameters, data)
         update_z!(state,hyper_parameters,data)
         update_w!(state,hyper_parameters,data)
 
