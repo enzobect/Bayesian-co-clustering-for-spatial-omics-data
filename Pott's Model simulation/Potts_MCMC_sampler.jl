@@ -43,8 +43,87 @@ end
 
 function update_μ_and_σ2!(state::MCMC_State, hyper_Parameters::Hyper_Parameters)
 end
-function update_z!(state::MCMC_State, hyper_parameters::Hyper_Parameters)
+
+@inline function get_spots_of_clusters(state::MCMC_State,N::Int, R::Int)::Dict{Int, Vector{Int}}
+    # construct the data structure
+    res = Dict{Int, Vector{Int}}()
+    for r in 1:R
+        res[r] = Int[]
+    end
+
+    #fill in the inverse map
+    for n in 1:N
+        push!(res[state.w[n]], n)
+    end
+
+    return res
 end
+"""
+returns a dictionary from spot cluster idx r to a 2-element vector
+the vector consists of
+
+    1. ∑y_n,i for i in cluster r
+    2. ∑(y_n,i)^2 for i in cluster r
+"""
+@inline function get_moments_of_values_by_spot_cluster(data::Observed_Data, cluster_to_spots::Dict{Int, Vector{Int}}, g::Int,R::Int)::Dict{Int,Vector{Float64}}
+    moment = Dict{Int,Vector{Float64}}()
+    for r in 1:R
+        moment[r] = Float64[0,0]
+        values = @view data.y[cluster_to_spots[r], g]
+        moment[r][1] = sum(values)
+        moment[r][2] = sum(values .^ 2)
+    end
+    return moment
+end
+
+function update_z!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::Observed_Data)
+
+  N = data.N
+  G = data.G
+  K = hyper_parameters.K
+  R = hyper_parameters.R
+  π = hyper_parameters.π
+
+  cluster_to_spot = get_spots_of_clusters(state, N, R)
+
+  # For each gene g in {1,...,G}
+  for g in 1:G
+    log_probabilities = zeros(K) 
+
+    moment_by_cluster = get_moments_of_values_by_spot_cluster(data, cluster_to_spot, g, R)
+
+    for k in 1:K
+      # Initialize log probabilities with the prior probabilities
+      log_probabilities[k] = log(π[k])
+
+      # Evaluation of the posterior distribution (Equation 11), with optimization also used in update_w!()
+      for r in 1:R
+        n_values = length(cluster_to_spot[r])
+        cluster_mean = state.μ[r,k]
+        cluster_variance = state.σ2[r,k]
+
+        log_probabilities[k] += -0.5 *
+                            (((moment_by_cluster[r][2] - 2 * cluster_mean * moment_by_cluster[r][1] + cluster_mean^2 * n_values)
+                              / cluster_variance)
+                              + log(cluster_variance) * n_values
+                            ) 
+      end
+    end
+  
+    max_log_probabilities = maximum(log_probabilities)
+
+    # Normalize the probabilities and take the exponential to get the actual probabilities
+    # .- does the vector-scalar subtraction and exp. does the element-wise exponential (instead of the matrix exponential)
+    normalized_probabilities = exp.(log_probabilities .- max_log_probabilities) 
+    normalized_probabilities /= sum(normalized_probabilities)
+
+    # Sample a new cluster assignment from the Multinomial with the computed probabilities
+    state.z[g] = rand(Categorical(normalized_probabilities))
+
+  end
+
+end
+
 # TODO: instead of computing this every time for w|res, compute and upate in z|res and store in the aux. object
 @inline function get_genes_of_clusters(state::MCMC_State,G::Int, K::Int)::Dict{Int, Vector{Int}}
     # construct the data structure
@@ -67,7 +146,7 @@ the vector consists of
     1. ∑y_n,i for i in cluster c
     2. ∑(y_n,i)^2 for in cluster c
 """
-@inline function get_moments_of_values_by_cluster(data::Observed_Data, cluster_to_genes::Dict{Int, Vector{Int}}, n::Int,K::Int)::Dict{Int,Vector{Float64}}
+@inline function get_moments_of_values_by_gene_cluster(data::Observed_Data, cluster_to_genes::Dict{Int, Vector{Int}}, n::Int,K::Int)::Dict{Int,Vector{Float64}}
     moment = Dict{Int,Vector{Float64}}()
     for c in 1:K
         moment[c] = Float64[0,0]
@@ -87,13 +166,13 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
   # Generate a permutation σ of J = {1,2,...,N}
   permutation = randperm(N)
 
-  cluster_to_gene = get_genes_of_clusters(state, data.G, hyper_parameters.K)
+  cluster_to_gene = get_genes_of_clusters(state, G, K)
 
   # For j in 1,...,N
   for n in permutation
     log_probabilities = zeros(R)
 
-    moment_by_cluster = get_moments_of_values_by_cluster(data, cluster_to_gene, n, K)
+    moment_by_cluster = get_moments_of_values_by_gene_cluster(data, cluster_to_gene, n, K)
 
     for r in 1:R
       # Count the number of neighbors of spot n that are assigned to cluster r (δ(w_j, w_j') in Equation 6)
@@ -112,10 +191,10 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
           cluster_variance = state.σ2[r,c]
           
           data_likelihood += -0.5 * # ∑(vi - μ)^2 = ∑vi^2 - 2μ∑vi + μ^2×#{g in cluster c}
-                            (   (moment_by_cluster[c][2] - 2 * cluster_mean * moment_by_cluster[c][1] + cluster_mean^2 * n_values)
-                                / cluster_variance
-                            ) +
-                            log(cluster_variance)*n_values
+                            (((moment_by_cluster[c][2] - 2 * cluster_mean * moment_by_cluster[c][1] + cluster_mean^2 * n_values)
+                              / cluster_variance)
+                              + log(cluster_variance)*n_values
+                            )
 
       end
 
