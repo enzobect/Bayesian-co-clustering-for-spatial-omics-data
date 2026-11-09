@@ -20,7 +20,7 @@ const SEED = hash("MCMC sampler for the Pott's Model")
 
     data = Observed_Data(DataFrames.nrow(obs_values),
                          DataFrames.ncol(obs_values),
-                            Matrix(obs_values),
+                            log1p.(Matrix(obs_values)),
                             Matrix(adjecency))
     return data
 end
@@ -72,7 +72,6 @@ function main()
     Random.seed!(SEED)
 
     @showprogress for i in 1:config.sampler.n_iter
-        # sleep(.001)
         update_μ_and_σ2!(state,hyper_parameters, data)
         update_z!(state,hyper_parameters,data)
         update_w!(state,hyper_parameters,data)
