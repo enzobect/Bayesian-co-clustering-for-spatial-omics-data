@@ -64,6 +64,10 @@ end
                       Auxiliary_Vars())
 end
 
+function summarize_state(state::MCMC_State)::MCMC_State
+    return MCMC_State(deepcopy(state.w),deepcopy(state.z), [0;;], [0;;], Auxiliary_Vars())
+end
+
 function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int)
     Random.seed!(seed)
     state::MCMC_State = init_state(data.N,data.G,hp)
@@ -78,7 +82,7 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
         update_z!(state,hp,data)
         update_w!(state,hp,data)
 
-        push!(history, deepcopy(state))
+        push!(history, summarize_state(state))
         # TODO: save the history frequently to support early termination
     end
 
