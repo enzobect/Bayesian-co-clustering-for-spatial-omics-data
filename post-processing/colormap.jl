@@ -6,6 +6,7 @@ using DataFrames
 using Dates
 include("utils.jl")
 include("clustering.jl")
+include("salso.jl")
 
 #TODO: move to a more appropriate module/config file
 const LINKAGE        = :average       # :average (UPGMA) is the usual choice for 1 - P
@@ -119,11 +120,36 @@ function main()
     @printf("   %d spots, %d iterations; keeping %d samples (burn-in %d, thin %d)\n", N, max_iters, length(cols), burn, THIN)
 
     # distance as (1 - posterior prob. of i and j being in the same cluster)
-    D, ns = coclustering_distance(group_iter, cols)
+    # D, ns = coclustering_distance(group_iter, cols)
 
 
     # TODO: use strategy to be able to switch the clustering algorithm
-    labels,k = preform_heirarchial_clustering(D,LINKAGE)
+    # labels,k = preform_heirarchial_clustering(D,LINKAGE)
+
+    # Run SALSO on the selected MCMC samples to find a final grouping
+    labels, k, expected_loss = perform_salso(
+    group_iter,
+    cols;
+    max_clusters = 20
+    )
+
+    # Display the number of clusters and the loss
+    println("SALSO selected $k clusters")
+    println("Posterior expected VI loss: $expected_loss")
+
+    # Collect gene cluster labels from every saved MCMC iteration.
+    # Rows represent genes; columns represent iterations.
+    gene_iter = hcat([state.z for state in history]...)
+
+    # Find the final grouping of genes using the same selected iterations.
+    gene_labels, gene_k, gene_loss = perform_salso(
+        gene_iter,
+        cols;
+        max_clusters = 20
+    )
+
+    println("SALSO selected $gene_k gene clusters")
+    println("Gene posterior expected VI loss: $gene_loss")
 
     colors = cluster_colors(k)
 
