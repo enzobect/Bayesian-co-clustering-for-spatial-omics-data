@@ -68,7 +68,6 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
     Random.seed!(seed)
     state::MCMC_State = init_state(data.N,data.G,hp)
     history = MCMC_State[] # TODO: takes too much space
-    Random.seed!(SEED)
 
     for i in 1:config.sampler.n_iter
         if i % 100 == 0 #TODO: mutliple prints of the same chain
