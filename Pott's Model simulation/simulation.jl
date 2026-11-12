@@ -5,6 +5,7 @@ using JLD2
 using Dates
 using DataFrames
 using ProgressMeter
+
 # %%
 const CONFIG_FILE_PATH = "config.json"
 const SEED = hash("MCMC sampler for the Pott's Model")
@@ -39,11 +40,15 @@ end
                             π)
 end
 # %%
-@inline function save_history(config, history::Vector{MCMC_State})
+@inline function save_history(config, history::Vector{MCMC_State},id::Int=nothing)
     dir_path = config.paths.path_to_history_files
     timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-    file_name = "states_$timestamp.jld2"
 
+    if id !== nothing
+        file_name = "states_$(timestamp)_$id.jld2"
+    else
+        file_name = "states_$timestamp.jld2"
+    end
     mkpath(dir_path)
     jldsave(joinpath(dir_path, file_name), history=history)
 end
@@ -58,30 +63,74 @@ end
                       ones(R,K), ones(R,K),
                       Auxiliary_Vars())
 end
-# %%
-function main()
-    config = JSON.parsefile(CONFIG_FILE_PATH)
 
-    hyper_parameters::Hyper_Parameters = load_hyper_parameters(config)
-
-    data::Observed_Data = load_data(config)
-
-    # TODO: initialize The MCMC state
-    state::MCMC_State = init_state(data.N,data.G,hyper_parameters)
+function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int)
+    Random.seed!(seed)
+    state::MCMC_State = init_state(data.N,data.G,hp)
     history = MCMC_State[] # TODO: takes too much space
     Random.seed!(SEED)
 
-    @showprogress for i in 1:config.sampler.n_iter
-        update_μ_and_σ2!(state,hyper_parameters, data)
-        update_z!(state,hyper_parameters,data)
-        update_w!(state,hyper_parameters,data)
+    for i in 1:config.sampler.n_iter
+        if i % 100 == 0 #TODO: mutliple prints of the same chain
+            println("chain $chain_id at iteration $i")
+        end
+        update_μ_and_σ2!(state,hp, data)
+        update_z!(state,hp,data)
+        update_w!(state,hp,data)
 
         push!(history, deepcopy(state))
         # TODO: save the history frequently to support early termination
     end
 
 
-    save_history(config,history)
+    save_history(config,history, id=chain_id)
+end
+function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, seeds::Vector{Int}, id::Int)
+    for seed in seeds
+        run_MCMC_single_chain(config, data,hp, seed, id)
+    end
+end
+# %%
+function main()
+    config = JSON.parsefile(CONFIG_FILE_PATH)
+
+
+    hyper_parameters::Hyper_Parameters = load_hyper_parameters(config)
+
+    data::Observed_Data = load_data(config)
+
+    n_threads = Threads.nthreads()
+
+    n_chains = config.sampler.n_chains
+
+    # ids_to_seeds = Dict{Int,Vector{Int}}()
+    # for i in 1:n_threads
+    #     ids_to_seeds[i] = []
+    # end
+    ids_to_seeds = [[1],[2]]
+    for i in 1:n_chains
+        push!(ids_to_seeds[i % n_threads], i) # TODO: fix the seed
+    end
+    for i in 1:n_threads
+        Threads.@spawn run_MCMC_multiple_chains(config, data, hyper_parameters, ids_to_seeds[i], i)
+    end
+    run_MCMC_single_chain(config, data,hyper_parameters, 1, 1)
+    # # TODO: initialize The MCMC state
+    # state::MCMC_State = init_state(data.N,data.G,hyper_parameters)
+    # history = MCMC_State[] # TODO: takes too much space
+    # Random.seed!(SEED)
+
+    # @showprogress for i in 1:config.sampler.n_iter
+    #     update_μ_and_σ2!(state,hyper_parameters, data)
+    #     update_z!(state,hyper_parameters,data)
+    #     update_w!(state,hyper_parameters,data)
+
+    #     push!(history, deepcopy(state))
+    #     # TODO: save the history frequently to support early termination
+    # end
+
+
+    # save_history(config,history)
 end
 
 # %%
