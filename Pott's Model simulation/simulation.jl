@@ -4,8 +4,7 @@ using JSON
 using JLD2
 using Dates
 using DataFrames
-using ProgressMeter
-
+using Term.Progress
 # %%
 const CONFIG_FILE_PATH = "config.json"
 const SEED = hash("MCMC sampler for the Pott's Model")
@@ -68,16 +67,13 @@ function summarize_state(state::MCMC_State)::MCMC_State
     return MCMC_State(deepcopy(state.w),deepcopy(state.z), [0;;], [0;;], Auxiliary_Vars())
 end
 
-function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int)
+function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int, job::ProgressJob)
     Random.seed!(seed)
     state::MCMC_State = init_state(data.N,data.G,hp)
     history = MCMC_State[] # TODO: takes too much space
 
     for i in 1:config.sampler.n_iter
-        if i % 100 == 0 
-            println("chain $chain_id at iteration $i with seed $seed")
-            flush(stdout)
-        end
+        Progress.update!(job)
         update_μ_and_σ2!(state,hp, data)
         update_z!(state,hp,data)
         update_w!(state,hp,data)
@@ -87,11 +83,18 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
     end
 
 
-    save_history(config,history, id=chain_id)
+    save_history(config,history, chain_id)
 end
-function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, seeds::Vector{Int})
-    for seed in seeds
-        run_MCMC_single_chain(config, data,hp, seed, Threads.threadid())
+function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, seeds::Vector{Int}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
+    for (i,seed) in enumerate(seeds)
+        job = nothing
+        @lock pb_lock begin
+            job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $i at worker #$(Threads.threadid() - 1)")
+        end
+        run_MCMC_single_chain(config, data,hp, seed, Threads.threadid(), job)
+        @lock pb_lock begin
+            removejob!(pbar, job)
+        end
     end
 
 end
@@ -116,12 +119,15 @@ function main()
         push!(ids_to_seeds[i % n_threads + 1], Random.rand(Int,1)[1]) # TODO: fix the seed
     end
 
-    @sync begin # ensure the process doesn't terminate before all chains finish execution
-        for i in 1:n_threads
-            Threads.@spawn run_MCMC_multiple_chains(config, data, hyper_parameters, ids_to_seeds[i])
+    pbar = ProgressBar()
+    pb_update_lock = ReentrantLock()
+    with(pbar) do # the block makes sure the bars update while the threads are running
+        @sync begin # ensure the process doesn't terminate before all chains finish execution
+            for i in 1:n_threads
+                Threads.@spawn run_MCMC_multiple_chains(config, data, hyper_parameters, ids_to_seeds[i], pbar, pb_update_lock)
+            end
         end
     end
-    
 end
 
 # %%
