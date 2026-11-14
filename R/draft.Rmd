@@ -1,0 +1,34 @@
+---
+title: "BISON"
+output:
+  html_document: default
+  pdf_document: default
+date: '2026-10-30'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{rsetup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+# Packages
+
+```{r pressure, results = 'markup'}
+if(!require(pheatmap)) install.packages("pheatmap")
+library(pheatmap)
+
+```
+
+## Cleaning the dataset
+
+```{r pressure, results = 'markup'}
+data1 <- read_csv("/Users/enzobect/Documents/Bayesian-co-clustering-for-spatial-omics-data/Data/data_processed/mouse_brain_4700_bin_centers.csv")
+
+data2 <- read_csv("/Users/enzobect/Documents/Bayesian-co-clustering-for-spatial-omics-data/Data/data_processed/mouse_brain_top500_4700bins_vals.csv")
+
+
+
+
+head(data2, 10)
+```

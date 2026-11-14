@@ -196,9 +196,10 @@ $P(w) = \pi_0^{w_{0}}*(1-\pi_0)^{w-w_{0}}* \frac{\gamma^R*\prod_{r=1}^R{\text{Ga
 
 gamma_parameter<-c(0.1,0.2,0.5,1,2,5)
 
+# alpha_pi = beta_pi = 1 donc suit une loi uniforme 
+pi_0<-runif(1)
 
-
-
+      
 
 
 
@@ -206,4 +207,4 @@ gamma_parameter<-c(0.1,0.2,0.5,1,2,5)
 
 ## Posterior inference
 
-$P(\mu,w,z \mid Y ) \propto P(Y \mid \mu,w,z)*P(\mu \mid w,z)*P(z)$
+$P(\mu,w,z \mid Y ) \propto P(Y \mid \mu,w,z)*P(\mu \mid w,z)*P(z)*P(w)$
