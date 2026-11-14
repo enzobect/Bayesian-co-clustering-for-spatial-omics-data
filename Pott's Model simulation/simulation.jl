@@ -39,7 +39,7 @@ end
                             π)
 end
 # %%
-@inline function save_history(config, history::Vector{MCMC_State},id::Int=nothing)
+@inline function save_history(config, history::Vector{MCMC_State},id::Union{Int,Nothing}=nothing)
     dir_path = config.paths.path_to_history_files
     timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
 
@@ -85,13 +85,13 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
 
     save_history(config,history, chain_id)
 end
-function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, seeds::Vector{Int}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
-    for (i,seed) in enumerate(seeds)
+function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, chains::Vector{Tuple{Int,Int}}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
+    for (i,seed) in chains # (chain id, seed)
         job = nothing
         @lock pb_lock begin
             job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $i at worker #$(Threads.threadid() - 1)")
         end
-        run_MCMC_single_chain(config, data,hp, seed, Threads.threadid(), job)
+        run_MCMC_single_chain(config, data,hp, seed, i, job)
         @lock pb_lock begin
             removejob!(pbar, job)
         end
@@ -111,12 +111,12 @@ function main()
 
     n_chains = config.sampler.n_chains
 
-    ids_to_seeds = Dict{Int,Vector{Int}}()
+    ids_to_seeds = Dict{Int,Vector{Tuple{Int,Int}}}()
     for i in 1:n_threads
-        ids_to_seeds[i] = Int[]
+        ids_to_seeds[i] = Tuple{Int,Int}[]
     end
     for i in 1:n_chains
-        push!(ids_to_seeds[i % n_threads + 1], Random.rand(Int,1)[1]) # TODO: fix the seed
+        push!(ids_to_seeds[i % n_threads + 1], (i, Random.rand(Int))) # TODO: fix the seed
     end
 
     pbar = ProgressBar()

@@ -131,7 +131,7 @@ the vector consists of
         moment[r] = Float64[0,0]
         values = @view data.y[cluster_to_spots[r], g]
         moment[r][1] = sum(values)
-        moment[r][2] = sum(values .^ 2)
+        moment[r][2] = sum(abs2, values)
     end
     return moment
 end
@@ -212,7 +212,7 @@ the vector consists of
         moment[c] = Float64[0,0]
         values = @view data.y[n, cluster_to_genes[c]]
         moment[c][1] = sum(values)
-        moment[c][2] = sum(values .^ 2)
+        moment[c][2] = sum(abs2, values)
     end
     return moment
 end
@@ -237,7 +237,7 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
     for r in 1:R
       # Count the number of neighbors of spot n that are assigned to cluster r (δ(w_j, w_j') in Equation 6)
       number_of_neighbors_r = 0
-      for neighbor in data.adjecency[n,:]
+      for neighbor in @view data.adjecency[n,:]
         if neighbor != 0 && state.w[neighbor] == r
           number_of_neighbors_r += 1
         end
