@@ -4,7 +4,7 @@ using JSON
 using JLD2
 using Dates
 using DataFrames
-using ProgressMeter
+using Term.Progress
 # %%
 const CONFIG_FILE_PATH = "config.json"
 const SEED = hash("MCMC sampler for the Pott's Model")
@@ -39,11 +39,15 @@ end
                             π)
 end
 # %%
-@inline function save_history(config, history::Vector{MCMC_State})
+@inline function save_history(config, history::Vector{MCMC_State},id::Union{Int,Nothing}=nothing)
     dir_path = config.paths.path_to_history_files
     timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-    file_name = "states_$timestamp.jld2"
 
+    if id !== nothing
+        file_name = "states_$(timestamp)_$id.jld2"
+    else
+        file_name = "states_$timestamp.jld2"
+    end
     mkpath(dir_path)
     jldsave(joinpath(dir_path, file_name), history=history)
 end
@@ -58,30 +62,72 @@ end
                       ones(R,K), ones(R,K),
                       Auxiliary_Vars())
 end
+
+function summarize_state(state::MCMC_State)::MCMC_State
+    return MCMC_State(deepcopy(state.w),deepcopy(state.z), [0;;], [0;;], Auxiliary_Vars())
+end
+
+function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int, job::ProgressJob)
+    Random.seed!(seed)
+    state::MCMC_State = init_state(data.N,data.G,hp)
+    history = MCMC_State[] # TODO: takes too much space
+
+    for i in 1:config.sampler.n_iter
+        Progress.update!(job)
+        update_μ_and_σ2!(state,hp, data)
+        update_z!(state,hp,data)
+        update_w!(state,hp,data)
+
+        push!(history, summarize_state(state))
+        # TODO: save the history frequently to support early termination
+    end
+
+
+    save_history(config,history, chain_id)
+end
+function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, chains::Vector{Tuple{Int,Int}}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
+    for (i,seed) in chains # (chain id, seed)
+        job = nothing
+        @lock pb_lock begin
+            job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $i at worker #$(Threads.threadid() - 1)")
+        end
+        run_MCMC_single_chain(config, data,hp, seed, i, job)
+        @lock pb_lock begin
+            removejob!(pbar, job)
+        end
+    end
+
+end
 # %%
 function main()
     config = JSON.parsefile(CONFIG_FILE_PATH)
+    Random.seed!(SEED)
 
     hyper_parameters::Hyper_Parameters = load_hyper_parameters(config)
 
     data::Observed_Data = load_data(config)
 
-    # TODO: initialize The MCMC state
-    state::MCMC_State = init_state(data.N,data.G,hyper_parameters)
-    history = MCMC_State[] # TODO: takes too much space
-    Random.seed!(SEED)
+    n_threads = Threads.nthreads()
 
-    @showprogress for i in 1:config.sampler.n_iter
-        update_μ_and_σ2!(state,hyper_parameters, data)
-        update_z!(state,hyper_parameters,data)
-        update_w!(state,hyper_parameters,data)
+    n_chains = config.sampler.n_chains
 
-        push!(history, deepcopy(state))
-        # TODO: save the history frequently to support early termination
+    ids_to_seeds = Dict{Int,Vector{Tuple{Int,Int}}}()
+    for i in 1:n_threads
+        ids_to_seeds[i] = Tuple{Int,Int}[]
+    end
+    for i in 1:n_chains
+        push!(ids_to_seeds[i % n_threads + 1], (i, Random.rand(Int))) # TODO: fix the seed
     end
 
-
-    save_history(config,history)
+    pbar = ProgressBar()
+    pb_update_lock = ReentrantLock()
+    with(pbar) do # the block makes sure the bars update while the threads are running
+        @sync begin # ensure the process doesn't terminate before all chains finish execution
+            for i in 1:n_threads
+                Threads.@spawn run_MCMC_multiple_chains(config, data, hyper_parameters, ids_to_seeds[i], pbar, pb_update_lock)
+            end
+        end
+    end
 end
 
 # %%
