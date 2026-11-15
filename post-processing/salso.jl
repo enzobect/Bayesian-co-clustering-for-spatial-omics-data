@@ -1,7 +1,7 @@
 using RCall
 
 function perform_salso(
-    group_iter::Matrix{Int},
+    group_iter::AbstractMatrix{<:Integer},
     cols;
     max_clusters::Int,
     n_runs::Int = 16,
@@ -11,7 +11,7 @@ function perform_salso(
 
     # Julia currently stores: items × iterations.
     # R SALSO expects: sampled iterations × items.
-    draws = permutedims(group_iter[:, cols])
+    draws = Int.(permutedims(group_iter[:, cols]))
 
     @rput draws max_clusters n_runs seed
 

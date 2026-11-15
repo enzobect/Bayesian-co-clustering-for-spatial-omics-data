@@ -1,15 +1,44 @@
 using JLD2
 const FIGURES_DIR = "../../figures"
+const DIAGNOSTICS_DIR = "../../posterior_loss"
 const COORDS_FILE    = "../../mouse_brain_data/mouse_brain_4700_bin_centers.csv"
 
-function choose_history_and_load()
-    history_list = readdir(RESULTS_DIR)
-    println("which one?")
-    for (i, f) in enumerate(history_list)
-        println("$i. $f")
+function history_files()
+    isdir(RESULTS_DIR) || error("History directory does not exist: $(abspath(RESULTS_DIR))")
+    files = filter(
+        path -> isfile(path) && lowercase(splitext(path)[2]) == ".jld2",
+        readdir(RESULTS_DIR; join=true)
+    )
+    sort!(files)
+    isempty(files) && error("No .jld2 history files found in $(abspath(RESULTS_DIR))")
+    return files
+end
+
+function choose_history_files()
+    files = history_files()
+    println("Which history file should be processed?")
+    println("0. All files")
+    for (index, path) in enumerate(files)
+        println("$index. $(basename(path))")
     end
-    indx = parse(Int, readline())
-    history = load(joinpath(RESULTS_DIR, history_list[indx]))["history"]
+
+    choice = try
+        parse(Int, strip(readline()))
+    catch error
+        throw(ArgumentError("Please enter a number between 0 and $(length(files))."))
+    end
+
+    if choice == 0
+        return files
+    elseif 1 <= choice <= length(files)
+        return [files[choice]]
+    end
+
+    throw(ArgumentError("Please enter a number between 0 and $(length(files))."))
+end
+
+function load_history(path::AbstractString)
+    history = load(path)["history"]
     return history
 end
 

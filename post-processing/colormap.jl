@@ -3,7 +3,6 @@ using NearestNeighbors    # lattice spacing / orientation for the honeycomb
 using Statistics
 using CSV
 using DataFrames
-using Dates
 include("utils.jl")
 include("clustering.jl")
 include("salso.jl")
@@ -100,16 +99,33 @@ function write_honeycomb_svg(path, coords, labels, colors; title = "")
     write(path, String(take!(io)))
 end
 
+function write_posterior_report(
+    path::AbstractString,
+    history_path::AbstractString,
+    n_spots::Int,
+    n_iterations::Int,
+    n_samples::Int,
+    spot_k::Int,
+    spot_loss,
+    gene_k::Int,
+    gene_loss
+)
+    open(path, "w") do io
+        println(io, "history_file = $(abspath(history_path))")
+        println(io, "spots = $n_spots")
+        println(io, "iterations = $n_iterations")
+        println(io, "posterior_samples = $n_samples")
+        println(io, "spot_clusters = $spot_k")
+        println(io, "spot_posterior_expected_VI_loss = $spot_loss")
+        println(io, "gene_clusters = $gene_k")
+        println(io, "gene_posterior_expected_VI_loss = $gene_loss")
+    end
+end
 
-function main()
-
-    #load the chain
-    history = choose_history_and_load()
+function process_history(history_path, coords)
+    println("\nProcessing $(basename(history_path))")
+    history = load_history(history_path)
     group_iter::Matrix{Int} = states_to_cluster_mat(history)
-
-    # load the coordinates
-    coords_df = CSV.read(COORDS_FILE, DataFrames.DataFrame)
-    coords = Float64.(Matrix(coords_df[:, 2:3]))
 
     N, max_iters = size(group_iter)
     @assert size(coords, 1) == N "coordinates ($(size(coords, 1))) and group_iter ($N) disagree on the number of spots"
@@ -152,16 +168,40 @@ function main()
     println("Gene posterior expected VI loss: $gene_loss")
 
     colors = cluster_colors(k)
-
-    timestamp =Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-
     mkpath(FIGURES_DIR)
-    write_honeycomb_svg(joinpath(FIGURES_DIR,"bison_honeycomb-$timestamp.svg"), coords, labels, colors; title = "Pott's Model's spot clusters (k = $k)")
+    stem = splitext(basename(history_path))[1]
+    write_honeycomb_svg(
+        joinpath(FIGURES_DIR, "$stem.svg"),
+        coords,
+        labels,
+        colors;
+        title = "Pott's Model's spot clusters (k = $k)"
+    )
 
-    out = DataFrames.DataFrame(id = coords_df[:, 1], x = coords[:, 1], y = coords[:, 2], cluster = labels)
-    # CSV.write("bison_cluster_labels.csv", out)
-    println("Saved figure")
+    mkpath(DIAGNOSTICS_DIR)
+    write_posterior_report(
+        joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt"),
+        history_path,
+        N,
+        max_iters,
+        length(cols),
+        k,
+        expected_loss,
+        gene_k,
+        gene_loss
+    )
+    println("Saved figure: $(abspath(joinpath(FIGURES_DIR, "$stem.svg")))")
+    println("Saved posterior loss: $(abspath(joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt")))")
     println("location: $(abspath(FIGURES_DIR))")
+end
+
+function main()
+    coords_df = CSV.read(COORDS_FILE, DataFrames.DataFrame)
+    coords = Float64.(Matrix(coords_df[:, 2:3]))
+
+    for history_path in choose_history_files()
+        process_history(history_path, coords)
+    end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
