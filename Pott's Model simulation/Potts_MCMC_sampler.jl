@@ -16,8 +16,8 @@ mutable struct Auxiliary_Vars # If, for computational efficiency, makes sense to
 end
 
 mutable struct MCMC_State
-    w::Vector{Int}
-    z::Vector{Int}
+    w::Vector{UInt8}
+    z::Vector{UInt8}
     μ::Matrix{Float64}
     σ2::Matrix{Float64}
     auxiliary::Auxiliary_Vars
@@ -131,7 +131,7 @@ the vector consists of
         moment[r] = Float64[0,0]
         values = @view data.y[cluster_to_spots[r], g]
         moment[r][1] = sum(values)
-        moment[r][2] = sum(values .^ 2)
+        moment[r][2] = sum(abs2, values)
     end
     return moment
 end
@@ -148,7 +148,7 @@ function update_z!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
 
   # For each gene g in {1,...,G}
   for g in 1:G
-    log_probabilities = zeros(K) 
+    log_probabilities = zeros(K)
 
     moment_by_cluster = get_moments_of_values_by_spot_cluster(data, cluster_to_spot, g, R)
 
@@ -166,15 +166,15 @@ function update_z!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
                             (((moment_by_cluster[r][2] - 2 * cluster_mean * moment_by_cluster[r][1] + cluster_mean^2 * n_values)
                               / cluster_variance)
                               + log(cluster_variance) * n_values
-                            ) 
+                            )
       end
     end
-  
+
     max_log_probabilities = maximum(log_probabilities)
 
     # Normalize the probabilities and take the exponential to get the actual probabilities
     # .- does the vector-scalar subtraction and exp. does the element-wise exponential (instead of the matrix exponential)
-    normalized_probabilities = exp.(log_probabilities .- max_log_probabilities) 
+    normalized_probabilities = exp.(log_probabilities .- max_log_probabilities)
     normalized_probabilities /= sum(normalized_probabilities)
 
     # Sample a new cluster assignment from the Multinomial with the computed probabilities
@@ -212,7 +212,7 @@ the vector consists of
         moment[c] = Float64[0,0]
         values = @view data.y[n, cluster_to_genes[c]]
         moment[c][1] = sum(values)
-        moment[c][2] = sum(values .^ 2)
+        moment[c][2] = sum(abs2, values)
     end
     return moment
 end
@@ -237,7 +237,7 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
     for r in 1:R
       # Count the number of neighbors of spot n that are assigned to cluster r (δ(w_j, w_j') in Equation 6)
       number_of_neighbors_r = 0
-      for neighbor in data.adjecency[n,:]
+      for neighbor in @view data.adjecency[n,:]
         if neighbor != 0 && state.w[neighbor] == r
           number_of_neighbors_r += 1
         end
@@ -249,7 +249,7 @@ function update_w!(state::MCMC_State, hyper_parameters::Hyper_Parameters, data::
           n_values = length(cluster_to_gene[c])
           cluster_mean = state.μ[r,c]
           cluster_variance = state.σ2[r,c]
-          
+
           data_likelihood += -0.5 * # ∑(vi - μ)^2 = ∑vi^2 - 2μ∑vi + μ^2×#{g in cluster c}
                             (((moment_by_cluster[c][2] - 2 * cluster_mean * moment_by_cluster[c][1] + cluster_mean^2 * n_values)
                               / cluster_variance)

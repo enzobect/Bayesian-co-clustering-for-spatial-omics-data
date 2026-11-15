@@ -1,0 +1,4 @@
+.DS_Store
+README.html
+Data/Visium_HD_human_tissue/hex_values.npz
+Data/Visium_HD_human_tissue/hex_values_sparse.csv.gz
