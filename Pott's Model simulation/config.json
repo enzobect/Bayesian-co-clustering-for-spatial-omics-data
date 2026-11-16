@@ -10,8 +10,8 @@
     "pi":null
   },
   "paths":{
-    "path_to_values": "../../mouse_brain_data/mouse_brain_top500_4700bins_vals.csv",
-    "path_to_adjecency": "../../mouse_brain_data/adjecency.csv",
+    "path_to_values": "../../Visium_HD_human_tissue/human_top500_14000bins_vals.csv",
+    "path_to_adjecency": "../../Visium_HD_human_tissue/adjecency.csv",
     "path_to_history_files":"../../potts_history"
   },
   "sampler":{
