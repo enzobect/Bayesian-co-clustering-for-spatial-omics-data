@@ -16,7 +16,8 @@
   },
   "sampler":{
     "n_chains": 12,
-    "n_iter": 1e4
+    "n_iter": 1e4,
+    "summarize": true
   }
 
 }

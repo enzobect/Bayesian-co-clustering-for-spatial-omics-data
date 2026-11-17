@@ -78,7 +78,7 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
         update_z!(state,hp,data)
         update_w!(state,hp,data)
 
-        push!(history, summarize_state(state))
+        push!(history, config.sampler.summarize ? summarize_state(state) : deepcopy(state))
         # TODO: save the history frequently to support early termination
     end
 
