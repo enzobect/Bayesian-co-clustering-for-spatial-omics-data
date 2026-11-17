@@ -13,6 +13,9 @@ library(tidyverse)
 library(ggplot2)
 library(stats)
 
+# Fixed seed so the toy examples are reproducible
+set.seed(2026)
+
 # Creating the original "square" hexagonal grid
 sfc <- st_sfc(st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 0)))))
 # Increasing `cellsize` decreases the number of cells
@@ -206,8 +209,8 @@ rnormgamma <- function(n, mu0, lambda, alpha, beta) {
 plot_dist <- function(t, qfun, dfun, alpha = 0.05, res = 1000) {
   q <- qfun(1 - alpha / 2)
   t <- t |> mutate(
-    mini = mu - q * sigma_sq,
-    maxi = mu + q * sigma_sq
+    mini = mu - q * sqrt(sigma_sq),
+    maxi = mu + q * sqrt(sigma_sq)
   )
   lower_bound <- min(t$mini)
   upper_bound <- max(t$maxi)
@@ -221,7 +224,7 @@ plot_dist <- function(t, qfun, dfun, alpha = 0.05, res = 1000) {
       round(sigma_sq, 3)
     )) |>
     crossing(x = x) |>
-    mutate(y = dfun(x, mu, sigma_sq)) |>
+    mutate(y = dfun(x, mu, sqrt(sigma_sq))) |>
     ggplot(aes(x, y, color = curve)) +
     geom_line()
 }
@@ -339,8 +342,11 @@ register_toy <- function(toy_example) {
   } else {
     write.csv(hex_sf$cluster_type2, paste0(directory, "/spot_clustering.csv"))
   }
-  write.csv(create_mean_array(toy_example$parameters), paste0(directory, "/mean_array.csv"))
-  write.csv(create_sd_array(toy_example$parameters), paste0(directory, "/sd_array.csv"))
+  # toy_example is a 1-row tibble: list columns must be unwrapped with [[1]]
+  write.csv(create_mean_array(toy_example$parameters[[1]]), paste0(directory, "/mean_array.csv"))
+  write.csv(create_sd_array(toy_example$parameters[[1]]), paste0(directory, "/sd_array.csv"))
 }
 
-apply(toy_examples, 1, register_toy)
+dir.create("toy_examples", showWarnings = FALSE)
+for (i in seq_len(nrow(toy_examples))) {
+  register_toy(toy_examples[i, ])}
