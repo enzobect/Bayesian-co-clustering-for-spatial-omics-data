@@ -2,6 +2,7 @@ using JLD2
 const FIGURES_DIR = "../../figures"
 const DIAGNOSTICS_DIR = "../../posterior_loss"
 const COORDS_FILE    = "../../mouse_brain_data/mouse_brain_4700_bin_centers.csv"
+const RESULTS_DIR   = "../../potts_history"
 
 function history_files()
     isdir(RESULTS_DIR) || error("History directory does not exist: $(abspath(RESULTS_DIR))")

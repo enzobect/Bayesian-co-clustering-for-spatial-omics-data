@@ -1,13 +1,15 @@
 include("utils.jl")
 using CairoMakie
 using LaTeXStrings
-using ZedPlotPane
 
-const RESULTS_DIR   = "../../potts_history"
+
+
 
 # arbitrary choice of the clusters for the plots
 const gene_cluster_id = 5
 const spot_cluster_id = 5
+const wide_slice_bounds = [100,10_000]
+const zoom_slice_bounds = [1000,1500]
 
 function main()
     file_paths = choose_history_files()
@@ -21,8 +23,8 @@ function main()
         σ_vals[i] = history[i].σ2[spot_cluster_id,gene_cluster_id]
     end
 
-    wide_slice = 100:length(history)
-    zoomed_in_slice = 1000:1500
+    wide_slice = range(wide_slice_bounds[1],wide_slice_bounds[2])
+    zoomed_in_slice = range(zoom_slice_bounds[1],zoom_slice_bounds[2])
 
     fig = Figure()
     ax1 = Axis(fig[1,1], title=L"\text{Caterpillar wide view}(\mu)")
@@ -35,7 +37,7 @@ function main()
 
     lines!(ax3,wide_slice,σ_vals[wide_slice])
     lines!(ax4,zoomed_in_slice,σ_vals[zoomed_in_slice])
-display(fig)
+
     save(joinpath(FIGURES_DIR,"caterpilars.png"), fig)
 
 end
