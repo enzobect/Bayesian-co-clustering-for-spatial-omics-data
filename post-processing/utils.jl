@@ -1,7 +1,7 @@
 using JLD2
 const FIGURES_DIR = "../../figures"
 const DIAGNOSTICS_DIR = "../../posterior_loss"
-const COORDS_FILE    = "../../mouse_brain_data/mouse_brain_4700_bin_centers.csv"
+const COORDS_FILE    = "../Data/Visium_HD_human_tissue/human_14000_bin_centers.csv"
 
 function history_files()
     isdir(RESULTS_DIR) || error("History directory does not exist: $(abspath(RESULTS_DIR))")
@@ -40,6 +40,14 @@ end
 function load_history(path::AbstractString)
     history = load(path)["history"]
     return history
+end
+
+# β / seed / replicate stored by the simulation scripts (missing for older files)
+function load_run_info(path::AbstractString)
+    jldopen(path, "r") do f
+        get_key(k) = haskey(f, k) ? f[k] : missing
+        return (beta = get_key("beta"), seed = get_key("seed"), replicate = get_key("replicate"))
+    end
 end
 
 function states_to_cluster_mat(history)::Matrix{Int}

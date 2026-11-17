@@ -108,10 +108,14 @@ function write_posterior_report(
     spot_k::Int,
     spot_loss,
     gene_k::Int,
-    gene_loss
+    gene_loss,
+    info
 )
     open(path, "w") do io
         println(io, "history_file = $(abspath(history_path))")
+        println(io, "beta = $(info.beta)")
+        println(io, "seed = $(info.seed)")
+        println(io, "replicate = $(info.replicate)")
         println(io, "spots = $n_spots")
         println(io, "iterations = $n_iterations")
         println(io, "posterior_samples = $n_samples")
@@ -125,6 +129,8 @@ end
 function process_history(history_path, coords)
     println("\nProcessing $(basename(history_path))")
     history = load_history(history_path)
+    info = load_run_info(history_path)
+    println("   β = $(info.beta), seed = $(info.seed), replicate = $(info.replicate)")
     group_iter::Matrix{Int} = states_to_cluster_mat(history)
 
     N, max_iters = size(group_iter)
@@ -175,7 +181,7 @@ function process_history(history_path, coords)
         coords,
         labels,
         colors;
-        title = "Pott's Model's spot clusters (k = $k)"
+        title = "Pott's Model's spot clusters (β = $(info.beta), chain $(info.replicate), k = $k)"
     )
 
     mkpath(DIAGNOSTICS_DIR)
@@ -188,11 +194,23 @@ function process_history(history_path, coords)
         k,
         expected_loss,
         gene_k,
-        gene_loss
+        gene_loss,
+        info
     )
+    append_summary_row(history_path, info, k, expected_loss, gene_k, gene_loss)
     println("Saved figure: $(abspath(joinpath(FIGURES_DIR, "$stem.svg")))")
     println("Saved posterior loss: $(abspath(joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt")))")
     println("location: $(abspath(FIGURES_DIR))")
+end
+
+# one row per processed chain: compare β values / chains at a glance
+function append_summary_row(history_path, info, k, loss, gene_k, gene_loss)
+    path = joinpath(DIAGNOSTICS_DIR, "beta_summary.csv")
+    row = DataFrame(file = basename(history_path), beta = info.beta, replicate = info.replicate,
+                    seed = info.seed, spot_clusters = k, spot_VI_loss = loss,
+                    gene_clusters = gene_k, gene_VI_loss = gene_loss)
+    CSV.write(path, row; append = isfile(path))
+    println("Appended to summary: $(abspath(path))")
 end
 
 function main()

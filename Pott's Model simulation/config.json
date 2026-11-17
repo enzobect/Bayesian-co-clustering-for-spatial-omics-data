@@ -6,16 +6,16 @@
     "lambda": 1,
     "alpha_0": 1,
     "beta_0": 1,
-    "beta":1,
+    "beta": [1, 5, 10, 25, 50],
     "pi":null
   },
   "paths":{
-    "path_to_values": "../../Visium_HD_human_tissue/human_top500_14000bins_vals.csv",
-    "path_to_adjecency": "../../Visium_HD_human_tissue/adjecency.csv",
+    "path_to_values": "../Data/Visium_HD_human_tissue/human_top500_14000bins_vals.csv",
+    "path_to_adjecency": "../Data/Visium_HD_human_tissue/adjecency.csv",
     "path_to_history_files":"../../potts_history"
   },
   "sampler":{
-    "n_chains": 12,
+    "n_chains_per_beta": 2,
     "n_iter": 1e4
   }
 

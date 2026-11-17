@@ -1,4 +1,5 @@
 include("Potts_MCMC_sampler.jl")
+include("chains_setup.jl")   # Chain_Job, chain_jobs, history_file_path (β sweep)
 using CSV
 using JSON
 using JLD2
@@ -25,7 +26,7 @@ const SEED = hash("MCMC sampler for the Pott's Model")
     return data
 end
 # %%
-@inline function load_hyper_parameters(config)::Hyper_Parameters
+@inline function load_hyper_parameters(config, β::Real)::Hyper_Parameters
     π = config.hyper_parameters.pi
     if isnothing(π) # if weights not specified default to unif. dis'n
         π = ones(config.hyper_parameters.K)
@@ -35,21 +36,13 @@ end
     tmp = config.hyper_parameters
     return Hyper_Parameters(tmp.R, tmp.K,
                             tmp.mu_0, tmp.lambda, tmp.alpha_0, tmp.beta_0,
-                            tmp.beta,
+                            Float64(β),
                             π)
 end
 # %%
-@inline function save_history(config, history::Vector{MCMC_State},id::Union{Int,Nothing}=nothing)
-    dir_path = config.paths.path_to_history_files
-    timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
-
-    if id !== nothing
-        file_name = "states_$(timestamp)_$id.jld2"
-    else
-        file_name = "states_$timestamp.jld2"
-    end
-    mkpath(dir_path)
-    jldsave(joinpath(dir_path, file_name), history=history)
+@inline function save_history(config, history::Vector{MCMC_State}, job::Chain_Job)
+    path = history_file_path(config, job)
+    jldsave(path; history=history, beta=job.β, seed=job.seed, replicate=job.replicate)
 end
 # %%
 
@@ -67,8 +60,9 @@ function summarize_state(state::MCMC_State)::MCMC_State
     return MCMC_State(deepcopy(state.w),deepcopy(state.z), [0;;], [0;;], Auxiliary_Vars())
 end
 
-function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters, seed::Int, chain_id::Int, job::ProgressJob)
-    Random.seed!(seed)
+function run_MCMC_single_chain(config, data::Observed_Data, chain::Chain_Job, job::ProgressJob)
+    Random.seed!(chain.seed)
+    hp = load_hyper_parameters(config, chain.β)
     state::MCMC_State = init_state(data.N,data.G,hp)
     history = MCMC_State[] # TODO: takes too much space
 
@@ -83,15 +77,15 @@ function run_MCMC_single_chain(config, data::Observed_Data, hp::Hyper_Parameters
     end
 
 
-    save_history(config,history, chain_id)
+    save_history(config, history, chain)
 end
-function run_MCMC_multiple_chains(config, data::Observed_Data, hp::Hyper_Parameters, chains::Vector{Tuple{Int,Int}}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
-    for (i,seed) in chains # (chain id, seed)
+function run_MCMC_multiple_chains(config, data::Observed_Data, chains::Vector{Chain_Job}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
+    for chain in chains
         job = nothing
         @lock pb_lock begin
-            job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $i at worker #$(Threads.threadid() - 1)")
+            job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $(chain.id) (β=$(chain.β)) at worker #$(Threads.threadid() - 1)")
         end
-        run_MCMC_single_chain(config, data,hp, seed, i, job)
+        run_MCMC_single_chain(config, data, chain, job)
         @lock pb_lock begin
             removejob!(pbar, job)
         end
@@ -101,22 +95,19 @@ end
 # %%
 function main()
     config = JSON.parsefile(CONFIG_FILE_PATH)
-    Random.seed!(SEED)
-
-    hyper_parameters::Hyper_Parameters = load_hyper_parameters(config)
-
     data::Observed_Data = load_data(config)
 
     n_threads = Threads.nthreads()
 
-    n_chains = config.sampler.n_chains
+    jobs = chain_jobs(config, SEED)   # one per (β, replicate), each with its own seed
+    print_jobs(jobs)
 
-    ids_to_seeds = Dict{Int,Vector{Tuple{Int,Int}}}()
+    ids_to_seeds = Dict{Int,Vector{Chain_Job}}()
     for i in 1:n_threads
-        ids_to_seeds[i] = Tuple{Int,Int}[]
+        ids_to_seeds[i] = Chain_Job[]
     end
-    for i in 1:n_chains
-        push!(ids_to_seeds[i % n_threads + 1], (i, Random.rand(Int))) # TODO: fix the seed
+    for job in jobs
+        push!(ids_to_seeds[job.id % n_threads + 1], job)
     end
 
     pbar = ProgressBar()
@@ -124,7 +115,7 @@ function main()
     with(pbar) do # the block makes sure the bars update while the threads are running
         @sync begin # ensure the process doesn't terminate before all chains finish execution
             for i in 1:n_threads
-                Threads.@spawn run_MCMC_multiple_chains(config, data, hyper_parameters, ids_to_seeds[i], pbar, pb_update_lock)
+                Threads.@spawn run_MCMC_multiple_chains(config, data, ids_to_seeds[i], pbar, pb_update_lock)
             end
         end
     end
