@@ -235,7 +235,7 @@ function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_
         update_μ_and_σ2_gpu!(st, hp, d, W, Z)
         update_z_gpu!(st, d, W, logπ)
         update_w_gpu!(st, hp, d, onehot(st.z, hp.K))
-        push!(history, summarize(st))
+        push!(history, config.sampler.summarize ? summarize_state(st) : deepcopy(st))
         if i % 100 == 0 || i == n_iter
             el = time() - t0
             println("chain $(job.id) (β = $(hp.β), rep $(job.replicate)): iter $i/$n_iter  ($(round(el / i * 1000, digits=1)) ms/iter, ",

@@ -9,7 +9,7 @@ include("salso.jl")
 
 #TODO: move to a more appropriate module/config file
 const LINKAGE        = :average       # :average (UPGMA) is the usual choice for 1 - P
-const RESULTS_DIR   = "../../potts_history_visium100"   # = path_to_history_files in config_visium100.json
+const RESULTS_DIR   = "../../potts_history_visium100"
 
 const BASE_COLORS = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
                      "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"]
@@ -99,196 +99,109 @@ function write_honeycomb_svg(path, coords, labels, colors; title = "")
     write(path, String(take!(io)))
 end
 
-# report = list of key => value lines
-function write_report(path::AbstractString, lines)
+function write_posterior_report(
+    path::AbstractString,
+    history_path::AbstractString,
+    n_spots::Int,
+    n_iterations::Int,
+    n_samples::Int,
+    spot_k::Int,
+    spot_loss,
+    gene_k::Int,
+    gene_loss
+)
     open(path, "w") do io
-        for (key, value) in lines
-            println(io, "$key = $value")
-        end
+        println(io, "history_file = $(abspath(history_path))")
+        println(io, "spots = $n_spots")
+        println(io, "iterations = $n_iterations")
+        println(io, "posterior_samples = $n_samples")
+        println(io, "spot_clusters = $spot_k")
+        println(io, "spot_posterior_expected_VI_loss = $spot_loss")
+        println(io, "gene_clusters = $gene_k")
+        println(io, "gene_posterior_expected_VI_loss = $gene_loss")
     end
 end
 
-# SALSO point estimates of spots and genes from items × samples label matrices
-function salso_estimates(W, Z)
-    labels, k, loss = perform_salso(W, axes(W, 2); max_clusters = 20)
-    println("   SALSO: $k spot clusters, posterior expected VI loss $loss")
-    gene_labels, gene_k, gene_loss = perform_salso(Z, axes(Z, 2); max_clusters = 20)
-    println("   SALSO: $gene_k gene clusters, posterior expected VI loss $gene_loss")
-    return (labels = labels, k = k, loss = loss, gene_labels = gene_labels, gene_k = gene_k, gene_loss = gene_loss)
-end
+function process_history(history_path, coords)
+    println("\nProcessing $(basename(history_path))")
+    history = load_history(history_path)
+    group_iter::Matrix{Int} = states_to_cluster_mat(history)
 
-function save_estimate(stem, title, coords, est, report_lines, summary_row)
-    mkpath(FIGURES_DIR); mkpath(DIAGNOSTICS_DIR)
-    fig = joinpath(FIGURES_DIR, "$stem.svg")
-    write_honeycomb_svg(fig, coords, est.labels, cluster_colors(est.k); title = title)
-    rep = joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt")
-    write_report(rep, report_lines)
-    append_summary_row(summary_row)
-    println("   saved figure: $(abspath(fig))")
-    println("   saved report: $(abspath(rep))")
-end
+    N, max_iters = size(group_iter)
+    @assert size(coords, 1) == N "coordinates ($(size(coords, 1))) and group_iter ($N) disagree on the number of spots"
 
-# ---------------------------------------------------------------------------
-# one chain
-# ---------------------------------------------------------------------------
-function process_chain(chain, coords)
-    info = chain.info
-    println("\nChain $(basename(chain.path))  (β = $(info.beta), replicate $(info.replicate), seed $(info.seed))")
-    est = salso_estimates(chain.W, chain.Z)
-    stem = splitext(basename(chain.path))[1]
-    save_estimate(stem, "Pott's Model's spot clusters (β = $(info.beta), chain $(info.replicate), k = $(est.k))",
-                  coords, est,
-                  Pair{String,Any}["history_file" => abspath(chain.path), "beta" => info.beta, "seed" => info.seed,
-                   "replicate" => info.replicate, "spots" => size(chain.W, 1), "iterations" => chain.n_iter,
-                   "posterior_samples" => size(chain.W, 2),
-                   "spot_clusters" => est.k, "spot_posterior_expected_VI_loss" => est.loss,
-                   "gene_clusters" => est.gene_k, "gene_posterior_expected_VI_loss" => est.gene_loss],
-                  (file = basename(chain.path), beta = info.beta, replicate = string(info.replicate),
-                   seed = string(info.seed), spot_clusters = est.k, spot_VI_loss = est.loss,
-                   gene_clusters = est.gene_k, gene_VI_loss = est.gene_loss))
-    return est
-end
+    # choose a subset
+    burn = floor(Int, BURN_IN_FRAC * max_iters)
+    cols = (burn + 1):THIN:max_iters
+    @printf("   %d spots, %d iterations; keeping %d samples (burn-in %d, thin %d)\n", N, max_iters, length(cols), burn, THIN)
 
-# ---------------------------------------------------------------------------
-# chains with the same β pooled into one posterior sample
-#   Valid only if every chain targets the same posterior (same data, β, R, K, priors) and has
-#   reached the same mode. SALSO only uses partitions, so a different label numbering across
-#   chains (label switching) does not matter. Chains with different β are never mixed:
-#   they sample different posteriors.
-# ---------------------------------------------------------------------------
-function process_pooled(β, chains, coords; single_estimates = Dict())
-    n = length(chains)
-    println("\nPooling $n chains with β = $β: ", join([basename(c.path) for c in chains], ", "))
-    @assert length(unique(size(c.W, 1) for c in chains)) == 1 &&
-            length(unique(size(c.Z, 1) for c in chains)) == 1 "chains with β = $β have different numbers of spots/genes: not the same data"
+    # distance as (1 - posterior prob. of i and j being in the same cluster)
+    # D, ns = coclustering_distance(group_iter, cols)
 
-    W = reduce(hcat, [c.W for c in chains])
-    Z = reduce(hcat, [c.Z for c in chains])
-    est = salso_estimates(W, Z)
 
-    # convergence check: the pooled estimate should fit every chain about equally well,
-    # and (mode 3) each chain's own estimate should be close to the pooled one
-    lines = Pair{String,Any}[]
-    for c in chains
-        tag = "chain$(c.info.replicate)"
-        l_spot = partition_expected_loss(c.W, est.labels)
-        l_gene = partition_expected_loss(c.Z, est.gene_labels)
-        push!(lines, "$(tag)_file" => basename(c.path))
-        push!(lines, "$(tag)_spot_expected_VI_loss_of_pooled_estimate" => l_spot)
-        push!(lines, "$(tag)_gene_expected_VI_loss_of_pooled_estimate" => l_gene)
-        @printf("   %s: expected VI loss of the pooled estimate  spots %.4f  genes %.4f", tag, l_spot, l_gene)
-        if haskey(single_estimates, c.path)
-            s = single_estimates[c.path]
-            d_spot = vi_distance(s.labels, est.labels)
-            d_gene = vi_distance(s.gene_labels, est.gene_labels)
-            push!(lines, "$(tag)_spot_VI_own_estimate_vs_pooled" => d_spot)
-            push!(lines, "$(tag)_gene_VI_own_estimate_vs_pooled" => d_gene)
-            @printf("   | VI(own estimate, pooled)  spots %.4f  genes %.4f", d_spot, d_gene)
-        end
-        println()
-    end
-    println("   (much larger values for some chains = chains in different modes: the pooled result mixes them)")
+    # TODO: use strategy to be able to switch the clustering algorithm
+    # labels,k = preform_heirarchial_clustering(D,LINKAGE)
 
-    stem = "pooled_beta$(beta_tag(β))_$(n)chains"
-    files = [basename(c.path) for c in chains]
-    save_estimate(stem, "Pott's Model's spot clusters (β = $β, $n chains pooled, k = $(est.k))", coords, est,
-                  vcat(Pair{String,Any}["beta" => β, "chains" => n, "spots" => size(W, 1),
-                        "posterior_samples" => size(W, 2),
-                        "samples_per_chain" => join([size(c.W, 2) for c in chains], ","),
-                        "spot_clusters" => est.k, "spot_posterior_expected_VI_loss" => est.loss,
-                        "gene_clusters" => est.gene_k, "gene_posterior_expected_VI_loss" => est.gene_loss], lines),
-                  (file = "pooled: " * join(files, " + "), beta = β, replicate = "pooled($n)",
-                   seed = join([string(c.info.seed) for c in chains], ";"),
-                   spot_clusters = est.k, spot_VI_loss = est.loss,
-                   gene_clusters = est.gene_k, gene_VI_loss = est.gene_loss))
-    return est
-end
+    # Run SALSO on the selected MCMC samples to find a final grouping
+    labels, k, expected_loss = perform_salso(
+    group_iter,
+    cols;
+    max_clusters = 20
+    )
 
-beta_tag(β) = replace(@sprintf("%g", β), "." => "p")   # 2.5 -> "2p5", as in the chain file names
+    # Display the number of clusters and the loss
+    println("SALSO selected $k clusters")
+    println("Posterior expected VI loss: $expected_loss")
 
-# one row per processed chain / pooled group: compare β values / chains at a glance
-function append_summary_row(row::NamedTuple)
-    path = joinpath(DIAGNOSTICS_DIR, "beta_summary.csv")
-    CSV.write(path, DataFrame([row]); append = isfile(path))
-    println("   appended to summary: $(abspath(path))")
-end
+    # Collect gene cluster labels from every saved MCMC iteration.
+    # Rows represent genes; columns represent iterations.
+    gene_iter = hcat([state.z for state in history]...)
 
-# ---------------------------------------------------------------------------
-# trace plots of μ and σ² (after burn-in)
-# ---------------------------------------------------------------------------
-function process_traces(chain)
-    if chain.mu === nothing
-        println("   no μ / σ² in this file (old format): no trace plots")
-        return
-    end
-    # one caterpillar figure per block (r, k) that is non-empty after burn-in, in a folder per chain
-    dir = joinpath(TRACES_DIR, splitext(basename(chain.path))[1])
-    mkpath(dir)
-    blocks = findall(chain.occupied)
-    for I in blocks
-        r, k = Tuple(I)
-        write_caterpillar_svg(joinpath(dir, @sprintf("r%02d_k%02d.svg", r, k)),
-                              view(chain.mu, r, k, :), view(chain.sigma2, r, k, :), chain.burn;
-                              title = "β = $(chain.info.beta), chain $(chain.info.replicate): spot cluster r = $r, gene cluster k = $k")
-    end
-    println("   saved $(length(blocks)) caterpillar plots (one per block r, k): $(abspath(dir))")
-    n_skip = length(chain.occupied) - length(blocks)
-    n_skip > 0 && println("   $n_skip of $(length(chain.occupied)) blocks were empty in some iteration ",
-                          "after burn-in (prior draws): not drawn")
-end
+    # Find the final grouping of genes using the same selected iterations.
+    gene_labels, gene_k, gene_loss = perform_salso(
+        gene_iter,
+        cols;
+        max_clusters = 20
+    )
 
-# ---------------------------------------------------------------------------
-function choose_mode(n_files)
-    n_files == 1 && return 1
-    println("How should the chains be processed?")
-    println("1. Each chain separately")
-    println("2. Pool chains with the same β into one result")
-    println("3. Both (also compares each chain's estimate with the pooled one)")
-    choice = try
-        parse(Int, strip(readline()))
-    catch
-        0
-    end
-    1 <= choice <= 3 || throw(ArgumentError("Please enter 1, 2 or 3."))
-    return choice
+    println("SALSO selected $gene_k gene clusters")
+    println("Gene posterior expected VI loss: $gene_loss")
+
+    colors = cluster_colors(k)
+    mkpath(FIGURES_DIR)
+    stem = splitext(basename(history_path))[1]
+    write_honeycomb_svg(
+        joinpath(FIGURES_DIR, "$stem.svg"),
+        coords,
+        labels,
+        colors;
+        title = "Pott's Model's spot clusters (k = $k)"
+    )
+
+    mkpath(DIAGNOSTICS_DIR)
+    write_posterior_report(
+        joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt"),
+        history_path,
+        N,
+        max_iters,
+        length(cols),
+        k,
+        expected_loss,
+        gene_k,
+        gene_loss
+    )
+    println("Saved figure: $(abspath(joinpath(FIGURES_DIR, "$stem.svg")))")
+    println("Saved posterior loss: $(abspath(joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt")))")
+    println("location: $(abspath(FIGURES_DIR))")
 end
 
 function main()
     coords_df = CSV.read(COORDS_FILE, DataFrames.DataFrame)
     coords = Float64.(Matrix(coords_df[:, 2:3]))
 
-    # optional argument: folder with the chain files (default RESULTS_DIR), e.g. for the smoke test
-    files = choose_history_files(isempty(ARGS) ? RESULTS_DIR : ARGS[1])
-    mode = choose_mode(length(files))
-
-    chains = Any[]
-    for f in files
-        println("\nLoading $(basename(f))")
-        c = load_chain(f, BURN_IN_FRAC, THIN)
-        @assert size(c.W, 1) == size(coords, 1) "coordinates ($(size(coords, 1))) and $(basename(f)) ($(size(c.W, 1))) disagree on the number of spots"
-        @printf("   β = %s, %d iterations; keeping %d samples (burn-in %d, thin %d)\n",
-                c.info.beta, c.n_iter, length(c.kept), c.burn, THIN)
-        process_traces(c)
-        push!(chains, c)
+    for history_path in choose_history_files()
+        process_history(history_path, coords)
     end
-
-    single = Dict()
-    if mode in (1, 3)
-        for c in chains
-            single[c.path] = process_chain(c, coords)
-        end
-    end
-    if mode in (2, 3)
-        for (β, group) in group_chains_by_beta(chains)
-            if length(group) < 2
-                println("\nβ = $β: only one chain, nothing to pool")
-                mode == 2 && (single[group[1].path] = process_chain(group[1], coords))
-                continue
-            end
-            process_pooled(β, group, coords; single_estimates = single)
-        end
-    end
-    println("\nfigures: $(abspath(FIGURES_DIR))\ntraces:  $(abspath(TRACES_DIR))\nreports: $(abspath(DIAGNOSTICS_DIR))")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
