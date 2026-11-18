@@ -1,0 +1,37 @@
+{
+  "paths": {
+    "toy_examples_dir": "../toy_examples",
+    "adjacency": "../toy_examples/adjacency.csv",
+    "output_dir": "../../toy_final_results"
+  },
+  "examples": [
+    "toy_example_normal_spot_clust_1_gene_clust_1",
+    "toy_example_normal_spot_clust_1_gene_clust_2",
+    "toy_example_normal_spot_clust_2_gene_clust_1",
+    "toy_example_normal_spot_clust_2_gene_clust_2",
+    "toy_example_cauchy_spot_clust_1_gene_clust_1",
+    "toy_example_cauchy_spot_clust_1_gene_clust_2",
+    "toy_example_cauchy_spot_clust_2_gene_clust_1",
+    "toy_example_cauchy_spot_clust_2_gene_clust_2"
+  ],
+  "data": {
+    "log1p": false
+  },
+  "grid": {
+    "R": [3],
+    "K": [6],
+    "beta": [1, 1.5, 2, 2.5, 3],
+    "mu_0": [0],
+    "lambda": [1],
+    "alpha_0": [1],
+    "beta_0": [1]
+  },
+  "sampler": {
+    "n_iter": 5000,
+    "burn_in": 2000,
+    "eval_every": 10,
+    "n_chains_per_setting": 1,
+    "n_concurrent_chains": null,
+    "save_history": true
+  }
+}

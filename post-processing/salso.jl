@@ -5,7 +5,8 @@ function perform_salso(
     cols;
     max_clusters::Int,
     n_runs::Int = 16,
-    seed::Int = 123
+    seed::Int = 123,
+    n_cores::Int = 0          # salso: 0 = use all CPU cores (the n_runs are spread over them)
 )
     isempty(cols) && error("No samples remain after burn-in and thinning.")
 
@@ -13,7 +14,7 @@ function perform_salso(
     # R SALSO expects: sampled iterations × items.
     draws = Int.(permutedims(group_iter[:, cols]))
 
-    @rput draws max_clusters n_runs seed
+    @rput draws max_clusters n_runs seed n_cores
 
     R"""
     set.seed(seed)
@@ -23,7 +24,7 @@ function perform_salso(
         loss = salso::VI(),
         maxNClusters = max_clusters,
         nRuns = n_runs,
-        nCores = 1
+        nCores = n_cores
     )
 
     salso_labels <- as.integer(salso_fit)
@@ -43,4 +44,12 @@ function perform_salso(
     labels = [remap[label] for label in raw_labels]
 
     return labels, length(ids), rcopy(R"salso_loss")
+end
+
+# posterior expected VI loss of a fixed partition `labels` under the draws in group_iter (items × samples)
+function partition_expected_loss(group_iter::AbstractMatrix{<:Integer}, labels::AbstractVector{<:Integer})
+    draws = Int.(permutedims(group_iter))
+    estimate = Int.(labels)
+    @rput draws estimate
+    return rcopy(R"salso::partition.loss(draws, estimate, loss = salso::VI())")
 end
