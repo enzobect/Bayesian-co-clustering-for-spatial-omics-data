@@ -3,12 +3,19 @@ using NearestNeighbors    # lattice spacing / orientation for the honeycomb
 using Statistics
 using CSV
 using DataFrames
+using JSON
+
 include("utils.jl")
 include("clustering.jl")
 include("salso.jl")
+include("block_statistics.jl")
 
 #TODO: move to a more appropriate module/config file
 const LINKAGE        = :average       # :average (UPGMA) is the usual choice for 1 - P
+
+const SAMPLER_CONFIG_PATH = joinpath(
+    @__DIR__, "..", "Pott's Model simulation", "config.json"
+)
 
 const BASE_COLORS = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
                      "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"]
@@ -18,6 +25,28 @@ const FLIP_Y         = true           # true: y increases upwards, like a normal
 const BURN_IN_FRAC   = 0.5            # discard the first 50 % of iterations
 const THIN           = 10              # keep every THIN-th iteration after burn-in
 
+# Load the expression data using the sampler configuration.
+function load_expression_data(config, config_path)
+    expression_file = normpath(joinpath(
+        dirname(config_path),
+        config.paths.path_to_values
+    ))
+
+    expression_df = CSV.read(expression_file, DataFrame)
+    y = Matrix{Float64}(expression_df)
+
+    misc = get(config, "misc", Dict{String, Any}())
+    transform_data = Bool(get(misc, "transform_data", true))
+
+    if transform_data
+        y = log1p.(y)
+    end
+
+    println("Expression data: $expression_file")
+    println("Apply log1p transformation: $transform_data")
+
+    return y
+end
 
 function hsl_hex(h, s, l)
     c = (1 - abs(2l - 1)) * s
