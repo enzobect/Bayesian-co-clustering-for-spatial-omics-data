@@ -232,13 +232,29 @@ full_state(st::Device_State) =
     MCMC_State(UInt8.(Array(st.w)), UInt8.(Array(st.z)),
                Float64.(Array(st.μ)), Float64.(Array(st.σ2)), Auxiliary_Vars())
 
+    # Save cluster labels, block means, and block variances.
+# Array transfers the values to CPU memory and creates a snapshot.
+full_state(st::Device_State) =
+    MCMC_State(
+        UInt8.(Array(st.w)),
+        UInt8.(Array(st.z)),
+        Float64.(Array(st.μ)),
+        Float64.(Array(st.σ2)),
+        Auxiliary_Vars()
+    )
+
 function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_Job, n_iter::Int)
     Random.seed!(job.seed)
     USE_GPU && CUDA.seed!(job.seed)
+
     st = init_state(d, hp)
     logπ = AT(FT.(log.(hp.π)))
     history = MCMC_State[]
-    to_host = Bool(get(config.sampler, "save_mu_sigma2", false)) ? full_state : summarize
+
+    # Choose which information to preserve at every iteration.
+    save_parameters = Bool(get(config.sampler, "save_mu_sigma2", false))
+    snapshot = save_parameters ? full_state : summarize
+
     t0 = time()
     for i in 1:n_iter
         W = onehot(st.w, hp.R)
@@ -246,7 +262,9 @@ function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_
         update_μ_and_σ2_gpu!(st, hp, d, W, Z)
         update_z_gpu!(st, d, W, logπ)
         update_w_gpu!(st, hp, d, onehot(st.z, hp.K))
-        push!(history, to_host(st))
+
+        # Store a separate snapshot of this iteration.
+        push!(history, snapshot(st))
         if i % 100 == 0 || i == n_iter
             el = time() - t0
             println("chain $(job.id) (β = $(hp.β), rep $(job.replicate)): iter $i/$n_iter  ($(round(el / i * 1000, digits=1)) ms/iter, ",
