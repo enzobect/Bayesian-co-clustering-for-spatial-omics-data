@@ -1,23 +1,26 @@
 {
   "hyper_parameters":{
-    "R":20,
-    "K":20,
-    "mu_0": 4,
+    "R":3,
+    "K":3,
+    "mu_0": 0,
     "lambda": 1,
-    "alpha_0": 1,
+    "alpha_0": 3,
     "beta_0": 1,
-    "beta": 33,
+    "beta": 2,
     "pi":null
   },
   "paths":{
-    "path_to_values": "../Data/Visium_HD_human_tissue_100/human_top500_124504bins_vals.csv",
-    "path_to_adjecency": "../Data/Visium_HD_human_tissue_100/adjecency.csv",
-    "path_to_history_files":"../../potts_history_visium100"
+    "path_to_values": "../toy_examples/toy_example_normal_spot_clust_1_gene_clust_1/samples.csv",
+    "path_to_adjecency": "../toy_examples/adjacency.csv",
+    "path_to_history_files":"../../potts_history_toy_examples/toy_example_normal_spot_clust_1_gene_clust_1"
   },
   "sampler":{
     "n_chains_per_beta": 4,
     "n_iter": 1e4,
-    "save_mu_sigma2": false
+    "save_mu_sigma2": true
+  },
+  "misc":{
+    "transform_data": false
   }
 
 }

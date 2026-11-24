@@ -54,7 +54,7 @@ function load_data(config)::Observed_Data
     obs_values = DataFrame(CSV.File(config.paths.path_to_values))
     adjecency  = DataFrame(CSV.File(config.paths.path_to_adjecency, header=false))
     return Observed_Data(DataFrames.nrow(obs_values), DataFrames.ncol(obs_values),
-                         log1p.(Matrix(obs_values)), Matrix(adjecency))
+                         config.misc.transform_data ? log1p.(Matrix(obs_values)) : Matrix(obs_values), Matrix(adjecency))
 end
 
 function load_hyper_parameters(config, β::Real)::Hyper_Parameters
