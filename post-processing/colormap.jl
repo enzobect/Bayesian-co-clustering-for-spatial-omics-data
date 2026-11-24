@@ -137,7 +137,8 @@ function write_posterior_report(
     spot_loss,
     gene_k::Int,
     gene_loss,
-    info
+    info,
+    block_stats
 )
     open(path, "w") do io
         for history_path in history_paths
@@ -153,11 +154,33 @@ function write_posterior_report(
         println(io, "spot_posterior_expected_VI_loss = $spot_loss")
         println(io, "gene_clusters = $gene_k")
         println(io, "gene_posterior_expected_VI_loss = $gene_loss")
+        println(io, "\nBLOCK STATISTICS")
+println(io, "Empirical statistics conditional on the final SALSO partitions.")
+println(io, "Means are sample averages; variances use denominator n - 1.")
+println(io, "The parameter prior is not directly used in these calculations.")
+println(io, "Cluster-assignment uncertainty is not included.")
+
+println(io, "\nspot_cluster\tgene_cluster\tn_spots\tn_genes\tn_values\tmean_expression\tvariance_expression")
+
+for row in eachrow(block_stats)
+    println(
+        io,
+        join((
+            row.spot_cluster,
+            row.gene_cluster,
+            row.n_spots,
+            row.n_genes,
+            row.n_values,
+            row.mean_expression,
+            row.variance_expression
+        ), '\t')
+    )
+end
     end
 end
 
 # history_paths: one file, or several chains with the same β that are merged
-function process_history(history_paths, coords)
+function process_history(history_paths, coords, y, config)
     println("\nProcessing $(join(basename.(history_paths), ", "))")
     infos = load_run_info.(history_paths)
     info = (beta = infos[1].beta,
@@ -199,7 +222,7 @@ function process_history(history_paths, coords)
 
     # Run SALSO on the selected MCMC samples to find a final grouping
 
-    R_MCMC = size(history[1].μ)[1]
+    R_MCMC = Int(config.hyper_parameters.R)
 
     labels, k, expected_loss = perform_salso(
     group_iter,
@@ -213,7 +236,7 @@ function process_history(history_paths, coords)
 
     # Find the final grouping of genes using the same selected iterations.
 
-    K_MCMC = size(history[1].μ)[2]
+    K_MCMC = Int(config.hyper_parameters.K)
 
     gene_labels, gene_k, gene_loss = perform_salso(
         gene_iter,
@@ -223,6 +246,9 @@ function process_history(history_paths, coords)
 
     println("SALSO selected $gene_k gene clusters")
     println("Gene posterior expected VI loss: $gene_loss")
+
+    # Calculate statistics for the final SALSO blocks.
+    block_stats = block_statistics(y, labels, gene_labels)
 
     colors = cluster_colors(k)
     mkpath(FIGURES_DIR)
@@ -239,6 +265,10 @@ function process_history(history_paths, coords)
     )
 
     mkpath(DIAGNOSTICS_DIR)
+    CSV.write(
+    joinpath(DIAGNOSTICS_DIR, "$(stem)_block_statistics.csv"),
+    block_stats
+    )
     write_posterior_report(
         joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt"),
         history_paths,
@@ -249,7 +279,8 @@ function process_history(history_paths, coords)
         expected_loss,
         gene_k,
         gene_loss,
-        info
+        info,
+        block_stats
     )
     append_summary_row(stem, info, k, expected_loss, gene_k, gene_loss)
     println("Saved figure: $(abspath(joinpath(FIGURES_DIR, "$stem.svg")))")
@@ -268,11 +299,13 @@ function append_summary_row(stem, info, k, loss, gene_k, gene_loss)
 end
 
 function main()
+    config = JSON.parsefile(SAMPLER_CONFIG_PATH)
+    y = load_expression_data(config, SAMPLER_CONFIG_PATH)
     coords_df = CSV.read(COORDS_FILE, DataFrames.DataFrame)
     coords = Float64.(Matrix(coords_df[:, 2:3]))
 
     for history_paths in choose_history_groups()
-        process_history(history_paths, coords)
+        process_history(history_paths, coords, y, config)
     end
 end
 
