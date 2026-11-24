@@ -16,7 +16,8 @@
   },
   "sampler":{
     "n_chains_per_beta": 4,
-    "n_iter": 1e4
+    "n_iter": 1e4,
+    "save_mu_sigma2": false
   }
 
 }

@@ -12,6 +12,10 @@
 # If no working CUDA GPU is found, it falls back to CPU arrays (still
 # vectorised, so usually faster than the original loops).
 #
+# Optional key in config.json under "sampler":
+#   "save_mu_sigma2": false  (true: also save μ and σ2 of every iteration, needed by
+#                            post-processing/caterpillar.jl; files get much larger)
+#
 # Differences from simulation.jl:
 #   * all likelihood terms are computed with matrix products (one-hot cluster matrices)
 #   * z | rest : all genes are conditionally independent given w -> sampled in one shot
@@ -219,8 +223,14 @@ function init_state(d::Device_Data, hp::Hyper_Parameters)
                         AT(ones(FT, hp.R, hp.K)), AT(ones(FT, hp.R, hp.K)))
 end
 
+# Copy the device state to the host for the saved history.
+#   save_mu_sigma2 = false: only w and z (μ, σ2 replaced by 1×1 placeholders) -> small files
+#   save_mu_sigma2 = true : also μ and σ2 (needed by post-processing/caterpillar.jl)
 summarize(st::Device_State) =
     MCMC_State(UInt8.(Array(st.w)), UInt8.(Array(st.z)), [0.0;;], [0.0;;], Auxiliary_Vars())
+full_state(st::Device_State) =
+    MCMC_State(UInt8.(Array(st.w)), UInt8.(Array(st.z)),
+               Float64.(Array(st.μ)), Float64.(Array(st.σ2)), Auxiliary_Vars())
 
 function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_Job, n_iter::Int)
     Random.seed!(job.seed)
@@ -228,6 +238,7 @@ function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_
     st = init_state(d, hp)
     logπ = AT(FT.(log.(hp.π)))
     history = MCMC_State[]
+    to_host = Bool(get(config.sampler, "save_mu_sigma2", false)) ? full_state : summarize
     t0 = time()
     for i in 1:n_iter
         W = onehot(st.w, hp.R)
@@ -235,7 +246,7 @@ function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_
         update_μ_and_σ2_gpu!(st, hp, d, W, Z)
         update_z_gpu!(st, d, W, logπ)
         update_w_gpu!(st, hp, d, onehot(st.z, hp.K))
-        push!(history, summarize(st))
+        push!(history, to_host(st))
         if i % 100 == 0 || i == n_iter
             el = time() - t0
             println("chain $(job.id) (β = $(hp.β), rep $(job.replicate)): iter $i/$n_iter  ($(round(el / i * 1000, digits=1)) ms/iter, ",

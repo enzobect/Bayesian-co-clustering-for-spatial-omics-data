@@ -9,7 +9,6 @@ include("salso.jl")
 
 #TODO: move to a more appropriate module/config file
 const LINKAGE        = :average       # :average (UPGMA) is the usual choice for 1 - P
-const RESULTS_DIR   = "../../potts_history"
 
 const BASE_COLORS = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
                      "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"]
@@ -101,7 +100,7 @@ end
 
 function write_posterior_report(
     path::AbstractString,
-    history_path::AbstractString,
+    history_paths,
     n_spots::Int,
     n_iterations::Int,
     n_samples::Int,
@@ -112,7 +111,9 @@ function write_posterior_report(
     info
 )
     open(path, "w") do io
-        println(io, "history_file = $(abspath(history_path))")
+        for history_path in history_paths
+            println(io, "history_file = $(abspath(history_path))")
+        end
         println(io, "beta = $(info.beta)")
         println(io, "seed = $(info.seed)")
         println(io, "replicate = $(info.replicate)")
@@ -126,20 +127,39 @@ function write_posterior_report(
     end
 end
 
-function process_history(history_path, coords)
-    println("\nProcessing $(basename(history_path))")
-    history = load_history(history_path)
-    info = load_run_info(history_path)
+# history_paths: one file, or several chains with the same β that are merged
+function process_history(history_paths, coords)
+    println("\nProcessing $(join(basename.(history_paths), ", "))")
+    infos = load_run_info.(history_paths)
+    info = (beta = infos[1].beta,
+            seed = join([i.seed for i in infos], ", "),
+            replicate = join([i.replicate for i in infos], ", "))
     println("   β = $(info.beta), seed = $(info.seed), replicate = $(info.replicate)")
-    group_iter::Matrix{Int} = states_to_cluster_mat(history)
 
-    N, max_iters = size(group_iter)
+    # burn-in and thinning in each chain, then put the chains one after the other
+    spot_samples = Matrix{Int}[]
+    gene_samples = Matrix{Int}[]
+    max_iters = 0
+    for history_path in history_paths
+        history = load_history(history_path)
+        chain_iter::Matrix{Int} = states_to_cluster_mat(history)
+        chain_gene_iter = hcat([state.z for state in history]...)
+
+        # choose a subset
+        max_iters = size(chain_iter, 2)
+        burn = floor(Int, BURN_IN_FRAC * max_iters)
+        chain_cols = (burn + 1):THIN:max_iters
+        @printf("   %d iterations; keeping %d samples (burn-in %d, thin %d)\n", max_iters, length(chain_cols), burn, THIN)
+
+        push!(spot_samples, chain_iter[:, chain_cols])
+        push!(gene_samples, chain_gene_iter[:, chain_cols])
+    end
+    group_iter = hcat(spot_samples...)
+    gene_iter = hcat(gene_samples...)
+
+    N, n_samples = size(group_iter)
     @assert size(coords, 1) == N "coordinates ($(size(coords, 1))) and group_iter ($N) disagree on the number of spots"
-
-    # choose a subset
-    burn = floor(Int, BURN_IN_FRAC * max_iters)
-    cols = (burn + 1):THIN:max_iters
-    @printf("   %d spots, %d iterations; keeping %d samples (burn-in %d, thin %d)\n", N, max_iters, length(cols), burn, THIN)
+    cols = 1:n_samples
 
     # distance as (1 - posterior prob. of i and j being in the same cluster)
     # D, ns = coclustering_distance(group_iter, cols)
@@ -159,10 +179,6 @@ function process_history(history_path, coords)
     println("SALSO selected $k clusters")
     println("Posterior expected VI loss: $expected_loss")
 
-    # Collect gene cluster labels from every saved MCMC iteration.
-    # Rows represent genes; columns represent iterations.
-    gene_iter = hcat([state.z for state in history]...)
-
     # Find the final grouping of genes using the same selected iterations.
     gene_labels, gene_k, gene_loss = perform_salso(
         gene_iter,
@@ -175,7 +191,10 @@ function process_history(history_path, coords)
 
     colors = cluster_colors(k)
     mkpath(FIGURES_DIR)
-    stem = splitext(basename(history_path))[1]
+    stem = splitext(basename(history_paths[1]))[1]
+    if length(history_paths) > 1
+        stem = replace(stem, r"_chain.*" => "") * "_merged"
+    end
     write_honeycomb_svg(
         joinpath(FIGURES_DIR, "$stem.svg"),
         coords,
@@ -187,26 +206,26 @@ function process_history(history_path, coords)
     mkpath(DIAGNOSTICS_DIR)
     write_posterior_report(
         joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt"),
-        history_path,
+        history_paths,
         N,
         max_iters,
-        length(cols),
+        n_samples,
         k,
         expected_loss,
         gene_k,
         gene_loss,
         info
     )
-    append_summary_row(history_path, info, k, expected_loss, gene_k, gene_loss)
+    append_summary_row(stem, info, k, expected_loss, gene_k, gene_loss)
     println("Saved figure: $(abspath(joinpath(FIGURES_DIR, "$stem.svg")))")
     println("Saved posterior loss: $(abspath(joinpath(DIAGNOSTICS_DIR, "$(stem)_posterior_loss.txt")))")
     println("location: $(abspath(FIGURES_DIR))")
 end
 
 # one row per processed chain: compare β values / chains at a glance
-function append_summary_row(history_path, info, k, loss, gene_k, gene_loss)
+function append_summary_row(stem, info, k, loss, gene_k, gene_loss)
     path = joinpath(DIAGNOSTICS_DIR, "beta_summary.csv")
-    row = DataFrame(file = basename(history_path), beta = info.beta, replicate = info.replicate,
+    row = DataFrame(file = stem, beta = info.beta, replicate = info.replicate,
                     seed = info.seed, spot_clusters = k, spot_VI_loss = loss,
                     gene_clusters = gene_k, gene_VI_loss = gene_loss)
     CSV.write(path, row; append = isfile(path))
@@ -217,8 +236,8 @@ function main()
     coords_df = CSV.read(COORDS_FILE, DataFrames.DataFrame)
     coords = Float64.(Matrix(coords_df[:, 2:3]))
 
-    for history_path in choose_history_files()
-        process_history(history_path, coords)
+    for history_paths in choose_history_groups()
+        process_history(history_paths, coords)
     end
 end
 

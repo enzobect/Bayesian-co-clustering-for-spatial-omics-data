@@ -1,7 +1,8 @@
 using JLD2
-const FIGURES_DIR = "../../figures"
-const DIAGNOSTICS_DIR = "../../posterior_loss"
-const COORDS_FILE    = "../Data/Visium_HD_human_tissue/human_14000_bin_centers.csv"
+const FIGURES_DIR     = "../../figures_visium100"
+const DIAGNOSTICS_DIR = "../../posterior_loss_visium100"
+const COORDS_FILE     = "../Data/Visium_HD_human_tissue_100/human_124504_bin_centers.csv"
+const RESULTS_DIR     = "../../potts_history_visium100"   # = paths.path_to_history_files in config.json
 
 function history_files()
     isdir(RESULTS_DIR) || error("History directory does not exist: $(abspath(RESULTS_DIR))")
@@ -37,6 +38,32 @@ function choose_history_files()
     throw(ArgumentError("Please enter a number between 0 and $(length(files))."))
 end
 
+# Menu for colormap.jl. Returns groups of files; each group is processed together
+# (one SALSO run on the pooled draws).
+#   0     -> every file on its own
+#   1..N  -> that file on its own
+#   N+1   -> all files, chains with the same β pooled
+function choose_history_groups()
+    files = history_files()
+    N = length(files)
+    println("Which history file should be processed?")
+    println("0. All files, each chain separately")
+    for (index, path) in enumerate(files)
+        println("$index. $(basename(path))")
+    end
+    println("$(N + 1). All files, chains with the same β merged")
+
+    choice = tryparse(Int, strip(readline()))
+    if choice == 0
+        return [[f] for f in files]
+    elseif choice isa Int && 1 <= choice <= N
+        return [[files[choice]]]
+    elseif choice == N + 1
+        return group_by_beta(files)
+    end
+    throw(ArgumentError("Please enter a number between 0 and $(N + 1)."))
+end
+
 function load_history(path::AbstractString)
     history = load(path)["history"]
     return history
@@ -48,6 +75,18 @@ function load_run_info(path::AbstractString)
         get_key(k) = haskey(f, k) ? f[k] : missing
         return (beta = get_key("beta"), seed = get_key("seed"), replicate = get_key("replicate"))
     end
+end
+
+# Group history files by β, so that the replicate chains of the same β can be pooled.
+# Files without a stored β (older runs) each form their own group.
+function group_by_beta(paths)
+    groups = Dict{Any, Vector{String}}()
+    for p in paths
+        β = load_run_info(p).beta
+        push!(get!(groups, ismissing(β) ? p : β, String[]), p)
+    end
+    # β in increasing order, files without β at the end
+    return [sort(v) for (_, v) in sort(collect(groups); by = g -> g[1] isa Real ? (0, g[1], "") : (1, 0.0, g[1]))]
 end
 
 function states_to_cluster_mat(history)::Matrix{Int}
