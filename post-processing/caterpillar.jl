@@ -2,9 +2,6 @@ include("utils.jl")
 using CairoMakie
 using LaTeXStrings
 
-
-
-
 # arbitrary choice of the clusters for the plots
 const gene_cluster_id = 5
 const spot_cluster_id = 5
@@ -15,6 +12,25 @@ function main()
     file_paths = choose_history_files()
     history = load_history(file_paths[1])
 
+    isempty(history) && error("The selected history is empty")
+
+    μ_size = size(history[1].μ)
+    σ_size = size(history[1].σ2)
+    if μ_size != σ_size
+        error("Inconsistent μ/σ2 dimensions in the history: $(μ_size) vs $(σ_size)")
+    end
+    if μ_size == (1, 1)
+        error("The selected history contains summarized states with μ and σ2 set to 1×1 placeholders. " *
+              "Set sampler.summarize=false and rerun the sampler, or regenerate the history with μ and σ2 preserved.")
+    end
+    spot_clusters, gene_clusters = μ_size
+    if spot_cluster_id > spot_clusters
+        error("spot_cluster_id=$spot_cluster_id is outside μ/σ2 dimension 1:$spot_clusters")
+    end
+    if gene_cluster_id > gene_clusters
+        error("gene_cluster_id=$gene_cluster_id is outside μ/σ2 dimension 1:$gene_clusters")
+    end
+
 
     μ_vals = zeros(length(history))
     σ_vals = zeros(length(history))
@@ -23,8 +39,12 @@ function main()
         σ_vals[i] = history[i].σ2[spot_cluster_id,gene_cluster_id]
     end
 
-    wide_slice = range(wide_slice_bounds[1],wide_slice_bounds[2])
-    zoomed_in_slice = range(zoom_slice_bounds[1],zoom_slice_bounds[2])
+    wide_start = clamp(wide_slice_bounds[1], 1, length(history))
+    wide_stop = clamp(wide_slice_bounds[2], wide_start, length(history))
+    zoom_start = clamp(zoom_slice_bounds[1], 1, length(history))
+    zoom_stop = clamp(zoom_slice_bounds[2], zoom_start, length(history))
+    wide_slice = range(wide_start, wide_stop)
+    zoomed_in_slice = range(zoom_start, zoom_stop)
 
     fig = Figure()
     ax1 = Axis(fig[1,1], title=L"\text{Caterpillar wide view}(\mu)")

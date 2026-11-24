@@ -1,125 +1,321 @@
-include("Potts_MCMC_sampler.jl")
-include("chains_setup.jl")   # Chain_Job, chain_jobs, history_file_path (β sweep)
-using CSV
-using JSON
-using JLD2
-using Dates
-using DataFrames
-using Term.Progress
-# %%
+# GPU version of the Potts co-clustering Gibbs sampler.
+#
+# Usage (from this folder):
+#     julia -t 4 simulation_gpu.jl
+# (-t = Julia threads; chains run concurrently on the GPU, see "n_concurrent_chains")
+#
+# One-time setup:
+#     julia -e 'using Pkg; Pkg.add("CUDA")'
+#
+# Same config.json and same output format (.jld2 files with `history`) as
+# simulation.jl, so the post-processing scripts work unchanged.
+# If no working CUDA GPU is found, it falls back to CPU arrays (still
+# vectorised, so usually faster than the original loops).
+#
+# Optional keys in config.json under "sampler":
+#   * "burnin": 0   (iterations to discard before saving; default 0)
+#   * "thin": 1     (save every `thin`-th iteration after burn-in; default 1)
+
+include("Potts_MCMC_sampler.jl")   # Observed_Data, Hyper_Parameters, MCMC_State, Auxiliary_Vars
+include("chains_setup.jl")         # Chain_Job, chain_jobs, history_file_path
+using CUDA
+using CSV, JSON, JLD2, Dates, DataFrames
+using Random, Distributions, LinearAlgebra
+
 const CONFIG_FILE_PATH = "config.json"
 const SEED = hash("MCMC sampler for the Pott's Model")
-# %%
 
+const FT = Float32
+const USE_GPU = CUDA.functional()
+const AT = USE_GPU ? CuArray : Array
 
-@inline function load_data(config)::Observed_Data
-    y_data_path = config.paths.path_to_values
-    adj_path = config.paths.path_to_adjecency
-
-    obs_values= DataFrame(CSV.File(y_data_path))
-    adjecency = DataFrame(CSV.File(adj_path, header=false))
-
-    data = Observed_Data(DataFrames.nrow(obs_values),
-                         DataFrames.ncol(obs_values),
-                            log1p.(Matrix(obs_values)),
-                            Matrix(adjecency))
-    return data
+# ---------------------------------------------------------------------------
+# Loading & Saving
+# ---------------------------------------------------------------------------
+function load_data(config)::Observed_Data
+    obs_values = DataFrame(CSV.File(config.paths.path_to_values))
+    adjecency  = DataFrame(CSV.File(config.paths.path_to_adjecency, header=false))
+    return Observed_Data(
+        DataFrames.nrow(obs_values),
+        DataFrames.ncol(obs_values),
+        log1p.(Matrix(obs_values)),
+        Matrix(adjecency),
+    )
 end
-# %%
-@inline function load_hyper_parameters(config, β::Real)::Hyper_Parameters
+
+function load_hyper_parameters(config, β::Real)::Hyper_Parameters
     π = config.hyper_parameters.pi
-    if isnothing(π) # if weights not specified default to unif. dis'n
+    if isnothing(π)
         π = ones(config.hyper_parameters.K)
         π /= sum(π)
     end
-
     tmp = config.hyper_parameters
-    return Hyper_Parameters(tmp.R, tmp.K,
-                            tmp.mu_0, tmp.lambda, tmp.alpha_0, tmp.beta_0,
-                            Float64(β),
-                            π)
+    return Hyper_Parameters(
+        tmp.R, tmp.K, tmp.mu_0, tmp.lambda, tmp.alpha_0, tmp.beta_0,
+        Float64(β), π,
+    )
 end
-# %%
-@inline function save_history(config, history::Vector{MCMC_State}, job::Chain_Job)
+
+function save_history(config, history::Vector{MCMC_State}, job::Chain_Job)
     path = history_file_path(config, job)
-    jldsave(path; history=history, beta=job.β, seed=job.seed, replicate=job.replicate)
+    # Use IOStream instead of MmapIO to avoid Windows/OneDrive CreateFileMappingW errors
+    # on large files, and write to a local temp file first if needed.
+    try
+        jldopen(path, "w"; iotype=IOStream) do f
+            f["history"]   = history
+            f["beta"]      = job.β
+            f["seed"]      = job.seed
+            f["replicate"] = job.replicate
+        end
+        println("chain $(job.id) (β = $(job.β)): saved $(abspath(path))")
+    catch err
+        fallback = joinpath(tempdir(), basename(path))
+        @warn "Failed to save to $path ($err). Falling back to $fallback"
+        jldopen(fallback, "w"; iotype=IOStream) do f
+            f["history"]   = history
+            f["beta"]      = job.β
+            f["seed"]      = job.seed
+            f["replicate"] = job.replicate
+        end
+        println("chain $(job.id) (β = $(job.β)): saved fallback $(abspath(fallback))")
+    end
 end
-# %%
 
-# %%
-
-@inline function init_state(N::Int, G::Int, hyper_parameters::Hyper_Parameters)::MCMC_State
-    R = hyper_parameters.R
-    K = hyper_parameters.K
-    return MCMC_State(sample(1:R,N), sample(1:K,G),
-                      ones(R,K), ones(R,K),
-                      Auxiliary_Vars())
+# ---------------------------------------------------------------------------
+# Device data
+# ---------------------------------------------------------------------------
+struct Device_Data{M<:AbstractMatrix{FT}, V<:AbstractVector{Int32}, IM<:AbstractMatrix{Int32}}
+    N::Int
+    G::Int
+    Y::M                    # N×G  log1p counts
+    Y2::M                   # N×G  squared values
+    colors::Vector{V}       # spots of each colour class
+    colors_adj::Vector{IM}  # adjacency rows of those spots; padding 0 -> N+1 (dummy spot)
 end
 
-function summarize_state(state::MCMC_State)::MCMC_State
-    return MCMC_State(deepcopy(state.w),deepcopy(state.z), [0;;], [0;;], Auxiliary_Vars())
+"""
+Greedy graph colouring: no two neighbouring spots get the same colour.
+Neighbourhoods are symmetrised, so it is safe even if the adjacency file is not.
+A hexagonal grid needs 3 colours; greedy uses at most 7.
+"""
+function color_graph(adj::Matrix{Int}, N::Int)::Vector{Vector{Int}}
+    nbrs = [Int[] for _ in 1:N]
+    for n in 1:N, m in view(adj, n, :)
+        if m != 0 && m != n
+            push!(nbrs[n], m)
+            push!(nbrs[m], n)
+        end
+    end
+    color = zeros(Int, N)
+    for n in 1:N
+        used = Set(color[m] for m in nbrs[n])
+        c = 1
+        while c in used
+            c += 1
+        end
+        color[n] = c
+    end
+    return [findall(==(c), color) for c in 1:maximum(color)]
 end
 
-function run_MCMC_single_chain(config, data::Observed_Data, chain::Chain_Job, job::ProgressJob)
-    Random.seed!(chain.seed)
-    hp = load_hyper_parameters(config, chain.β)
-    state::MCMC_State = init_state(data.N,data.G,hp)
-    history = MCMC_State[] # TODO: takes too much space
+function to_device(data::Observed_Data)
+    classes = color_graph(data.adjecency, data.N)
+    adj_pad = replace(data.adjecency, 0 => data.N + 1)
+    Y = AT(FT.(data.y))
+    return Device_Data(
+        data.N, data.G, Y, Y .^ 2,
+        [AT(Int32.(idx)) for idx in classes],
+        [AT(Int32.(adj_pad[idx, :])) for idx in classes],
+    )
+end
 
-    for i in 1:config.sampler.n_iter
-        Progress.update!(job)
-        update_μ_and_σ2!(state,hp, data)
-        update_z!(state,hp,data)
-        update_w!(state,hp,data)
+mutable struct Device_State{V<:AbstractVector{Int32}, M<:AbstractMatrix{FT}}
+    w::V    # N spot labels
+    z::V    # G gene labels
+    μ::M    # R×K
+    σ2::M   # R×K
+end
 
-        push!(history, summarize_state(state))
-        # TODO: save the history frequently to support early termination
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+# one-hot matrix: labels (length n) -> n×L, label 0 gives an all-zero row
+onehot(labels::AbstractVector{Int32}, cats::AbstractMatrix{Int32}) = FT.(labels .== cats)
+
+# Sample one category per row of a matrix of (unnormalised) log-probabilities
+function gumbel_argmax(logp::AbstractMatrix)
+    U = rand!(similar(logp))
+    U .= clamp.(U, floatmin(FT), prevfloat(one(FT)))
+    noisy = logp .- log.(.-log.(U))
+    return Int32.(vec(map(I -> I[2], argmax(noisy, dims=2))))
+end
+
+# Terms that appear in both z and w full conditionals:
+#   Σ (y-μ)²/σ² + n log σ²  =  Σy²·A - 2Σy·B + n·C
+function precision_terms(st::Device_State)
+    A = 1 ./ st.σ2
+    B = st.μ .* A
+    C = st.μ .^ 2 .* A .+ log.(st.σ2)
+    return A, B, C
+end
+
+# ---------------------------------------------------------------------------
+# Gibbs updates
+# ---------------------------------------------------------------------------
+function update_μ_and_σ2_gpu!(st::Device_State, hp::Hyper_Parameters, d::Device_Data, W, Z)
+    # block sufficient statistics (R×K), computed on the GPU, moved to CPU in Float64
+    S1 = Float64.(Array(W' * (d.Y * Z)))
+    S2 = Float64.(Array(W' * (d.Y2 * Z)))
+    nr = Float64.(Array(vec(sum(W, dims=1))))
+    nk = Float64.(Array(vec(sum(Z, dims=1))))
+    m = nr * nk'
+
+    μ = similar(S1)
+    σ2 = similar(S1)
+    for i in eachindex(S1)
+        if m[i] == 0  # empty block: posterior = prior
+            λs, μs, αs, βs = hp.λ, hp.μ0, hp.α0, hp.β0
+        else
+            ȳ = S1[i] / m[i]
+            ss = max(S2[i] - m[i] * ȳ^2, 0.0)
+            λs = hp.λ + m[i]
+            μs = (hp.λ * hp.μ0 + m[i] * ȳ) / λs
+            αs = hp.α0 + m[i] / 2
+            βs = hp.β0 + ss / 2 + (hp.λ * m[i] / (2 * λs)) * (ȳ - hp.μ0)^2
+        end
+        σ2[i] = rand(InverseGamma(αs, βs))
+        μ[i] = rand(Normal(μs, sqrt(σ2[i] / λs)))
+    end
+    st.μ = AT(FT.(μ))
+    st.σ2 = AT(FT.(σ2))
+    return nothing
+end
+
+function update_z_gpu!(st::Device_State, d::Device_Data, W, logπ)
+    A, B, C = precision_terms(st)
+    nr = vec(sum(W, dims=1))     # R
+    T1 = W' * d.Y                # R×G
+    T2 = W' * d.Y2               # R×G
+    logp = logπ' .- FT(0.5) .* (T2' * A .- 2 .* (T1' * B) .+ (nr' * C))   # G×K
+    st.z = gumbel_argmax(logp)
+    return nothing
+end
+
+function update_w_gpu!(st::Device_State, hp::Hyper_Parameters, d::Device_Data, Z, cats_R, pad)
+    A, B, C = precision_terms(st)
+    nk = vec(sum(Z, dims=1))     # K
+    S1 = d.Y * Z                 # N×K
+    S2 = d.Y2 * Z                # N×K
+    # data part of the log full conditional, N×R (does not depend on w)
+    D = FT(-0.5) .* (S2 * A' .- 2 .* (S1 * B') .+ (C * nk)')
+    β = FT(hp.β)
+
+    for c in shuffle(1:length(d.colors))
+        idx = d.colors[c]
+        adj = d.colors_adj[c]
+        Wpad = onehot(vcat(st.w, pad), cats_R)   # (N+1)×R, last row = 0 (padding)
+        counts = Wpad[adj[:, 1], :]
+        for j in 2:size(adj, 2)
+            counts = counts .+ Wpad[adj[:, j], :]
+        end
+        st.w[idx] = gumbel_argmax(D[idx, :] .+ β .* counts)
+    end
+    return nothing
+end
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+function init_state(d::Device_Data, hp::Hyper_Parameters)
+    return Device_State(
+        AT(Int32.(rand(1:hp.R, d.N))),
+        AT(Int32.(rand(1:hp.K, d.G))),
+        AT(ones(FT, hp.R, hp.K)),
+        AT(ones(FT, hp.R, hp.K)),
+    )
+end
+
+summarize(st::Device_State) = MCMC_State(
+    UInt8.(Array(st.w)),
+    UInt8.(Array(st.z)),
+    Float64.(Array(st.μ)),
+    Float64.(Array(st.σ2)),
+    Auxiliary_Vars(),
+)
+
+function run_chain_gpu(config, d::Device_Data, hp::Hyper_Parameters, job::Chain_Job, n_iter::Int)
+    Random.seed!(job.seed)
+    USE_GPU && CUDA.seed!(job.seed)
+
+    st     = init_state(d, hp)
+    logπ   = AT(FT.(log.(hp.π)))
+    cats_R = AT(reshape(Int32.(1:hp.R), 1, hp.R))
+    cats_K = AT(reshape(Int32.(1:hp.K), 1, hp.K))
+    pad    = AT(Int32[0])
+
+    burnin = Int(get(config.sampler, "burnin", 0))
+    thin   = max(1, Int(get(config.sampler, "thin", 1)))
+    n_saved = n_iter > burnin ? fld(n_iter - burnin - 1, thin) + 1 : 0
+    history = MCMC_State[]
+    sizehint!(history, n_saved)
+
+    t0 = time()
+    for i in 1:n_iter
+        W = onehot(st.w, cats_R)
+        Z = onehot(st.z, cats_K)
+        update_μ_and_σ2_gpu!(st, hp, d, W, Z)
+        update_z_gpu!(st, d, W, logπ)
+        update_w_gpu!(st, hp, d, onehot(st.z, cats_K), cats_R, pad)
+
+        if i > burnin && (i - burnin - 1) % thin == 0
+            push!(history, summarize(st))
+        end
+
+        if i % 100 == 0 || i == n_iter
+            el = time() - t0
+            println(
+                "chain $(job.id) (β = $(hp.β), rep $(job.replicate)): iter $i/$n_iter  ",
+                "($(round(el / i * 1000, digits=1)) ms/iter, ",
+                "ETA $(round((n_iter - i) * el / i / 60, digits=1)) min)",
+            )
+        end
     end
 
-
-    save_history(config, history, chain)
+    save_history(config, history, job)
 end
-function run_MCMC_multiple_chains(config, data::Observed_Data, chains::Vector{Chain_Job}, pbar::Progress.ProgressBar, pb_lock::ReentrantLock)
-    for chain in chains
-        job = nothing
-        @lock pb_lock begin
-            job = addjob!(pbar, N = convert(Int,config.sampler.n_iter), description="chain $(chain.id) (β=$(chain.β)) at worker #$(Threads.threadid() - 1)")
-        end
-        run_MCMC_single_chain(config, data, chain, job)
-        @lock pb_lock begin
-            removejob!(pbar, job)
-        end
-    end
 
-end
-# %%
 function main()
     config = JSON.parsefile(CONFIG_FILE_PATH)
-    data::Observed_Data = load_data(config)
+    data = load_data(config)
+    d = to_device(data)
 
-    n_threads = Threads.nthreads()
+    println(
+        USE_GPU ? "Running on GPU: $(CUDA.name(CUDA.device()))" :
+                  "No working CUDA GPU found: running vectorised version on CPU",
+    )
+    println("N = $(d.N) spots, G = $(d.G) genes, $(length(d.colors)) colour classes, precision $FT")
 
-    jobs = chain_jobs(config, SEED)   # one per (β, replicate), each with its own seed
+    n_iter = Int(config.sampler.n_iter)
+    jobs = chain_jobs(config, SEED)
     print_jobs(jobs)
 
-    ids_to_seeds = Dict{Int,Vector{Chain_Job}}()
-    for i in 1:n_threads
-        ids_to_seeds[i] = Chain_Job[]
-    end
-    for job in jobs
-        push!(ids_to_seeds[job.id % n_threads + 1], job)
-    end
+    n_workers = clamp(Int(get(config.sampler, "n_concurrent_chains", Threads.nthreads())), 1, length(jobs))
+    println("Running $n_workers chains concurrently ($(Threads.nthreads()) Julia threads)")
+    USE_GPU && CUDA.synchronize()   # device data ready before other tasks/streams read it
 
-    pbar = ProgressBar()
-    pb_update_lock = ReentrantLock()
-    with(pbar) do # the block makes sure the bars update while the threads are running
-        @sync begin # ensure the process doesn't terminate before all chains finish execution
-            for i in 1:n_threads
-                Threads.@spawn run_MCMC_multiple_chains(config, data, ids_to_seeds[i], pbar, pb_update_lock)
-            end
+    queue = Channel{Chain_Job}(length(jobs))
+    foreach(j -> put!(queue, j), jobs)
+    close(queue)
+
+    @sync for _ in 1:n_workers
+        Threads.@spawn for job in queue
+            # each chain seeds its own task-local RNGs (CPU and GPU) inside run_chain_gpu
+            hp = load_hyper_parameters(config, job.β)
+            run_chain_gpu(config, d, hp, job, n_iter)
         end
     end
 end
 
-# %%
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
