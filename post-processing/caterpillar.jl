@@ -33,12 +33,8 @@ function main()
     end
 
 
-    μ_vals = zeros(length(history))
-    σ_vals = zeros(length(history))
-    for i in 1:length(history)
-        μ_vals[i] = history[i].μ[spot_cluster_id,gene_cluster_id]
-        σ_vals[i] = history[i].σ2[spot_cluster_id,gene_cluster_id]
-    end
+    μ_vals = [state.μ[spot_cluster_id, gene_cluster_id] for state in history]
+    σ_vals = [state.σ2[spot_cluster_id, gene_cluster_id] for state in history]
 
     wide_start = clamp(wide_slice_bounds[1], 1, length(history))
     wide_stop = clamp(wide_slice_bounds[2], wide_start, length(history))
