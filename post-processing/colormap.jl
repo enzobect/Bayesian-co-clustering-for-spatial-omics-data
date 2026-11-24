@@ -169,21 +169,27 @@ function process_history(history_paths, coords)
     # labels,k = preform_heirarchial_clustering(D,LINKAGE)
 
     # Run SALSO on the selected MCMC samples to find a final grouping
+
+    R_MCMC = size(history[1].μ)[1]
+
     labels, k, expected_loss = perform_salso(
     group_iter,
     cols;
-    max_clusters = 20
+    max_clusters = R_MCMC
     )
 
     # Display the number of clusters and the loss
-    println("SALSO selected $k clusters")
+    println("SALSO selected $k spot clusters")
     println("Posterior expected VI loss: $expected_loss")
 
     # Find the final grouping of genes using the same selected iterations.
+
+    K_MCMC = size(history[1].μ)[2]
+
     gene_labels, gene_k, gene_loss = perform_salso(
         gene_iter,
         cols;
-        max_clusters = 20
+        max_clusters = K_MCMC
     )
 
     println("SALSO selected $gene_k gene clusters")
