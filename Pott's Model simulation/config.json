@@ -15,7 +15,7 @@
     "path_to_history_files":"../../potts_history_toy_examples/toy_example_normal_spot_clust_1_gene_clust_1"
   },
   "sampler":{
-    "n_chains_per_beta": 2,
+    "n_chains_per_beta": 4,
     "n_iter": 1e4,
     "save_mu_sigma2": true
   },

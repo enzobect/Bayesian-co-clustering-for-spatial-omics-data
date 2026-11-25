@@ -1,8 +1,8 @@
 using JLD2
-const FIGURES_DIR     = "../../figures_visium100"
-const DIAGNOSTICS_DIR = "../../posterior_loss_visium100"
-const COORDS_FILE     = "../Data/Visium_HD_human_tissue_100/human_124504_bin_centers.csv"
-const RESULTS_DIR     = "../../potts_history_visium100"   # = paths.path_to_history_files in config.json
+const FIGURES_DIR     = "../../figures_toy_examples/toy_example_normal_spot_clust_1_gene_clust_1"
+const DIAGNOSTICS_DIR = "../../posterior_loss_toy_examples/toy_example_normal_spot_clust_1_gene_clust_1"
+const COORDS_FILE     = "../toy_examples/bin_centers.csv"
+const RESULTS_DIR     = "../../potts_history_toy_examples/toy_example_normal_spot_clust_1_gene_clust_1"   # = paths.path_to_history_files in config.json
 
 function history_files()
     isdir(RESULTS_DIR) || error("History directory does not exist: $(abspath(RESULTS_DIR))")
